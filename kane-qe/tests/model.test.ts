@@ -380,6 +380,17 @@ describe('labels, edits and drafts', () => {
     expect(savedTestsFor(['/p/src/search/searchQuery.ts'], both)).toEqual(['search_ipod_test.md', 'cart_add_test.md'])
   })
 
+  test('equal matches: the test that last failed comes first, then the one run most recently, then by name', () => {
+    const saved = ['guest-checkout-places-order_test.md', 'guest-checkout-refuses-email_test.md', 'checkout_guest_test.md', 'checkout_express_test.md'].map(name => ({ name, text: 'Checkout as guest.' }))
+    const changed = ['src/checkout/validate.js']
+    expect(savedTestsFor(changed, saved)).toEqual(['checkout_express_test.md', 'checkout_guest_test.md', 'guest-checkout-places-order_test.md', 'guest-checkout-refuses-email_test.md'])
+    const last = { 'checkout_guest_test.md': { status: 'failed' as const, at: T0 }, 'guest-checkout-refuses-email_test.md': { status: 'passed' as const, at: T0 + 5000 } }
+    expect(savedTestsFor(changed, saved, last)).toEqual(['checkout_guest_test.md', 'guest-checkout-refuses-email_test.md', 'checkout_express_test.md', 'guest-checkout-places-order_test.md'])
+    // A better match still outranks a failure.
+    const better = [...saved, { name: 'validate_postcode_test.md', text: 'checkout validate' }]
+    expect(savedTestsFor(changed, better, last)[0]).toBe('validate_postcode_test.md')
+  })
+
   test('the drafted objective is the reply, without labels or quotes', () => {
     expect(objectiveFrom('Objective: "Type a postcode with a space and check the order is placed."')).toBe('Type a postcode with a space and check the order is placed.')
     // Real reply: the fork added a remark about the conversation after the objective.

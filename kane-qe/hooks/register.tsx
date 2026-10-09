@@ -22,6 +22,7 @@ import {
   debt,
   draftPrompt,
   elapsed,
+  firstLine,
   fmt,
   fold,
   foldMember,
@@ -283,7 +284,7 @@ function runDetail(ui: Kit, press: Press, r: Run, now: number, width: number) {
   )
 }
 
-function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null, now: number) {
+function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null, now: number, width: number) {
   const files = o?.files ?? change?.files ?? []
   const saved = o?.saved ?? []
   const hasDraft = !!(o && (o.drafting || o.objective || o.note))
@@ -313,7 +314,10 @@ function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null
             return (
               <ui.Box key={`saved-${t}`} flexDirection="row" gap={1}>
                 <ui.Box flexShrink={1}>
-                  <ui.Text dimColor>{last ? `${t} · last ${last.status === 'passed' ? '✓' : '✗'} ${ago(now - last.at)}` : t}</ui.Text>
+                  <ui.Text dimColor>{(() => {
+                    const tail = last ? ` · last ${last.status === 'passed' ? '✓' : '✗'} ${ago(now - last.at)}` : ''
+                    return `${cut(t.replace(/_test\.md$/, ''), Math.max(12, width - tail.length - 12))}${tail}`
+                  })()}</ui.Text>
                 </ui.Box>
                 <ui.Button key={`saved-run-${t}`} label="Run it" onPress={() => press(`saved:${t}`)} />
               </ui.Box>
@@ -541,7 +545,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
           </ui.Box>
         ))}
         {failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null}
-        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', r.failure.where) : null}
+        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', cut(firstLine(r.failure.where), Math.max(20, inner * 2 - 8))) : null}
         {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
         {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
         {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
@@ -663,7 +667,7 @@ async function poll($: EngineInterface) {
       seenPointers.add(e.name)
       const p = parsePointer((await $.fs.read(`${activeDir}/${e.name}`).catch(() => '')) ?? '', now)
       if (!p || !inside(p.cwd, projectDir) || !(await alive($, p.pid))) continue
-      runs = startWatch(runs, p, e.name)
+      runs = startWatch(runs, p, e.name, await processLabel($, p.pid))
       changed = true
     }
     // Members first, so a suite's end reads its members' last lines; a member a suite names now is read now too.
@@ -768,9 +772,15 @@ async function openEvidence($: EngineInterface, id: string) {
   void $.prompt.submit({ text: `Open the evidence for the kane-cli run in ${pack ?? r?.sessionDir ?? id}.` }).catch(() => undefined)
 }
 
-function startWatch(runs: Run[], p: Pointer, pointer: string): Run[] {
+/** A run nobody started in this chat is named from its own process: the command line kane-cli was started with. */
+async function processLabel($: EngineInterface, pid: number): Promise<string | undefined> {
+  const r = await $.process.run(['ps', '-o', 'args=', '-p', String(pid)], { timeoutMs: 3000 }).catch(() => undefined)
+  return r?.exitCode === 0 ? labelFromCommand(r.stdout)?.label : undefined
+}
+
+function startWatch(runs: Run[], p: Pointer, pointer: string, fromProcess?: string): Run[] {
   const id = p.sessionDir
-  const claimed = claimCommand(p.surface, p.started)
+  const claimed = claimCommand(p.surface, p.started) ?? (fromProcess ? { label: fromProcess } : undefined)
   const run = newRun(id, p.surface, p.sessionDir, p.started, { pid: p.pid, cwd: p.cwd, ...(claimed ? { label: claimed.label, labelRank: RANK.command } : {}), ...(claimed?.toolUseId ? { toolUseId: claimed.toolUseId } : {}) })
   // A reload follows the file again from its start, replacing what the last module folded.
   watches.set(id, { id, path: `${p.sessionDir}/events.ndjson`, pointer, pid: p.pid, bytes: 0, rest: '', done: false })
@@ -874,13 +884,13 @@ async function openOffer($: EngineInterface) {
   await update($, viewAtom, v => ({ ...v, tab: 'runs' as const, open: 'offer' }))
   await openPane($)
   const tests = await savedTests($)
-  const saved = savedTestsFor(files, tests)
   const history = (await recent($))[projectDir] ?? []
   const last: Record<string, HistoryEntry> = {}
-  for (const name of saved) {
-    const hit = history.find(h => h.label === name || h.label.endsWith(`/${name}`))
-    if (hit) last[name] = hit
+  for (const t of tests) {
+    const hit = history.find(h => h.label === t.name || h.label.endsWith(`/${t.name}`))
+    if (hit) last[t.name] = hit
   }
+  const saved = savedTestsFor(files, tests, last)
   await update($, offerAtom, () => ({ files, drafting: false, saved, url: startUrl(tests), last }))
   // A saved test that covers the change comes first; Claude drafts a new objective only when none does.
   if (saved.length === 0) await draftObjective($)
@@ -1156,7 +1166,7 @@ export const register: Register = (on, options) => {
     let body
     if (v.tab === 'assure') body = assureView(ui, press, await read($, assuranceAtom), now, v.uc)
     else if (v.tab === 'history') body = historyView(ui, await read($, historyAtom), now, width)
-    else if (v.open === 'offer') body = offerView(ui, press, await read($, offerAtom), await read($, changeAtom), now)
+    else if (v.open === 'offer') body = offerView(ui, press, await read($, offerAtom), await read($, changeAtom), now, width)
     else if (opened?.kind === 'testrun' && opened.members) body = suiteView(ui, press, opened, now, width, true)
     else if (opened) body = runDetail(ui, press, opened, now, width)
     else body = runsView(ui, press, runs, now, width, await read($, lastAtom))

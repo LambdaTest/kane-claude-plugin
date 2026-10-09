@@ -23,7 +23,7 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
@@ -52,6 +52,7 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
     const argv = e.argv
     state.ran.push([...argv])
     if (argv[0] === 'open') return OK('') as never
+    if (argv[0] === 'ps') return (state.ps?.[Number(argv[4])] ? OK(`${state.ps[Number(argv[4])]}\n`) : OK('', 1)) as never
     if (argv[0] === 'kill') return OK('', state.alive.has(Number(argv[2])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'check-ignore') return OK('', state.ignored.has(String(argv[3])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'diff') return OK('+ postcode.trim()') as never
@@ -335,6 +336,21 @@ describe('watching kane-cli', () => {
     await pane.unmount()
   })
 
+  test('a test file started outside the chat is named from its own process', async ($, on) => {
+    const w = world(on, { ps: { 91: '/opt/kane/bin/node /opt/kane/kane-cli/dist/index.js testmd run .testmuai/tests/empty_cart_test.md --agent --headless' } })
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    startRun(w, 91, `${S}/o1`, 'testmd', line({ type: 'stream_start', surface: 'testmd', pid: 91 }) + line({ type: 'test_md_step_start', step_index: 1, heading: 'Step 1' }, 1) + line({ type: 'run_start', objective: 'At the shop, open the cart page and assert it is empty' }, 1))
+    startRun(w, 92, `${S}/o2`, 'testmd', line({ type: 'stream_start', surface: 'testmd', pid: 92 }) + line({ type: 'run_start', objective: 'Sign in as the test user' }, 1))
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    expect(await pane.find({ key: `run-${S}/o1`, type: 'Button' })).toBeDefined()
+    expect((await pane.find({ key: `run-${S}/o1` }))?.props.label).toBe('empty_cart_test.md')
+    // With no process to read, the objective names it, as before.
+    expect((await pane.find({ key: `run-${S}/o2` }))?.props.label).toBe('Sign in as the test user')
+    await pane.unmount()
+  })
+
   test('a stale pointer and another project’s run are not shown', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
@@ -391,7 +407,7 @@ describe('after Claude changes code', () => {
     await w.clock.settle()
     const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
     // A saved test covers it: offered first, no draft until asked.
-    expect(await pane.find({ type: 'Text', text: /checkout_guest_test.md/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^checkout_guest$/ })).toBeDefined()
     expect(await pane.find({ key: 'saved-run-checkout_guest_test.md' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /Suggested objective/ })).toBeUndefined()
     await pane.press({ key: 'offer-draft' })

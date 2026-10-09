@@ -548,6 +548,9 @@ export function cardHeader(r: Run, now: number, room: number): { name: string; r
   return { name: cut(r.label, Math.max(min, room - width(result) - 8)), result }
 }
 
+/** The first line of a step's text: a designed test's step can run to a paragraph. */
+export const firstLine = (t: string): string => t.split('\n')[0]!.trim()
+
 /** A suite card's failures: three at most, then how many more. */
 export function cardFailures(r: Run): { rows: Run[]; more: number } {
   const failed = (r.members ?? []).filter(m => m.status === 'failed').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
@@ -690,8 +693,9 @@ export function featureWords(path: string): string[] {
   return [...new Set(words)]
 }
 
-/** Saved tests that mention a changed file's feature, best match first. */
-export function savedTestsFor(changed: readonly string[], saved: readonly { name: string; text: string }[]): string[] {
+/** Saved tests that mention a changed file's feature, best match first. Equal matches: one that last failed, then the
+ *  one run most recently, then by name. */
+export function savedTestsFor(changed: readonly string[], saved: readonly { name: string; text: string }[], last: Readonly<Record<string, Pick<HistoryEntry, 'status' | 'at'>>> = {}): string[] {
   const words = [...new Set(changed.flatMap(featureWords))]
   if (!words.length) return []
   return saved
@@ -703,7 +707,14 @@ export function savedTestsFor(changed: readonly string[], saved: readonly { name
       return { name: t.name, hits }
     })
     .filter(t => t.hits > 0)
-    .sort((a, b) => b.hits - a.hits)
+    .sort((a, b) => {
+      if (b.hits !== a.hits) return b.hits - a.hits
+      const [x, y] = [last[a.name], last[b.name]]
+      const failed = Number(y?.status === 'failed') - Number(x?.status === 'failed')
+      if (failed) return failed
+      if ((y?.at ?? 0) !== (x?.at ?? 0)) return (y?.at ?? 0) - (x?.at ?? 0)
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    })
     .map(t => t.name)
 }
 
