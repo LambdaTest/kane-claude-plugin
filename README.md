@@ -67,7 +67,7 @@ Nothing to start. Open Claude Code in a project and the band is there.
 
 `/config` → kane-qe: **After Claude changes code** (`offer` by default, `auto`, `off`) and **kane-cli command** (default `kane-cli`, used only for the read-only `cover gaps`). Colours follow Claude Code's theme.
 
-What it never does: it never starts a kane-cli test, and never shows what kane-cli did not report. The commands it runs are `kane-cli cover gaps --json`, `kill -0`, `git check-ignore` and `git diff`, and, only when you press *View evidence*, `kane-cli evidence serve <pack>` and `open`. It reads kane-cli's structured output only, with one exception: the viewer link that `evidence serve` prints.
+What it never does: it never starts a kane-cli test, and never shows what kane-cli did not report. The commands it runs are `kane-cli cover gaps --json`, `kill -0`, `ps`, `git check-ignore` and `git diff`, and, only when you press *View evidence*, `kane-cli evidence serve <pack>` and `open`. It reads kane-cli's structured output only, with one exception: the viewer link that `evidence serve` prints.
 
 ## How to publish it on Claude
 
@@ -76,7 +76,7 @@ What it never does: it never starts a kane-cli test, and never shows what kane-c
 ```
 claude plugin validate kane-qe --strict     # the plugin: manifest, hooks, state contract
 claude plugin validate . --strict           # the marketplace manifest
-claude plugin test kane-qe                  # 116 tests
+claude plugin test kane-qe                  # 122 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same on every push to `main` and on pull requests.

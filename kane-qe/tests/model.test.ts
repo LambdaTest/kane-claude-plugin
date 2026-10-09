@@ -4,6 +4,7 @@ import { adapt, splitLines } from '../hooks/adapter'
 import type { Ev } from '../hooks/adapter'
 import {
   band,
+  latest,
   cardFailures,
   cardHeader,
   cardResult,
@@ -260,6 +261,28 @@ describe('the card in the chat', () => {
       ['npm test', false],
     ]
     for (const [command, want] of cases) expect(isRunCommand(command)).toBe(want)
+  })
+})
+
+describe('a test run more than once', () => {
+  const failedThen = (later: Ev[]) => [checkoutFailed(), run('co2', 'run', [label('checkout_guest_test.md'), step(1, 'done', 'Open the cart', 5), ...later], T0 - 300_000)]
+
+  test('counts once, by its latest result: a failure it has since passed is gone from the band', () => {
+    const r = rows(failedThen([passed(40)]), { now: T0 + 60_000 })
+    expect(r[0]).toContain('✓ 1 passed')
+    expect(r[0]).not.toContain('failed')
+    expect(r[1]).toBe('')
+  })
+
+  test('a pass it has since failed shows the failure', () => {
+    const r = rows([loginPassed(), run('l2', 'run', [label('login_test.md'), step(1, 'failed', 'Sign in', 25), failedEnd(30)], T0 - 100_000)], { now: T0 + 60_000 })
+    expect(r[0]).toContain('✗ 1 failed')
+    expect(r[0]).not.toContain('passed')
+    expect(r[1]).toContain('✗ login failed on Sign in')
+  })
+
+  test('different tests are all kept', () => {
+    expect(latest([loginPassed(), checkoutFailed()]).length).toBe(2)
   })
 })
 

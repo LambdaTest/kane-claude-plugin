@@ -257,6 +257,16 @@ export function tally(list: readonly Run[]): Tally {
   return out
 }
 
+/** Each test by its latest result: a test that failed and then passed counts once, as passed. */
+export function latest(list: readonly Run[]): Run[] {
+  const newest = new Map<string, Run>()
+  for (const r of list) {
+    const seen = newest.get(r.label)
+    if (!seen || (r.endedAt ?? r.startedAt) >= (seen.endedAt ?? seen.startedAt)) newest.set(r.label, r)
+  }
+  return list.filter(r => newest.get(r.label) === r)
+}
+
 /** Seconds a run has taken, or has been going. */
 export const elapsed = (r: Run, now: number): number => ((r.endedAt ?? now) - r.startedAt) / 1000
 
@@ -470,8 +480,8 @@ function pickBand(runs: readonly Run[], o: BandOptions): Band {
     }
   }
 
-  // idle: counts cover runs seen in this session
-  const all = leaves(runs)
+  // idle: counts cover the tests seen in this session, each by its latest result
+  const all = latest(leaves(runs))
   const c = tally(all)
   const first: Item[] = [chip('idle', false)]
   if (c.passed) first.push({ t: `✓ ${c.passed} passed`, c: C.mint })

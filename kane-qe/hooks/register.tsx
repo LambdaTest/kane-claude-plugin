@@ -33,6 +33,7 @@ import {
   isRunCommand,
   isTrackedEdit,
   kindLine,
+  latest,
   labelFromCommand,
   leaves,
   newRun,
@@ -1155,7 +1156,8 @@ export const register: Register = (on, options) => {
     const runs = await read($, runsAtom)
     const now = await $.clock.now()
     const all = leaves(runs)
-    const c = tally(all)
+    // The header counts each test once, by its latest result, as the band does; the list below keeps every run.
+    const c = tally(all.some(r => r.status === 'running' || r.status === 'pending') ? all : latest(all))
     const width = Math.max(30, e.props.bodyColumns - 2)
     const table = $.ui.resolve(e)
     const ui: Kit = table
