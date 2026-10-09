@@ -520,6 +520,8 @@ describe('assurance', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       const pane = await $.ui.mount({ ...PANE, surface } as never)
       await pane.press({ key: 'tab-assure' })
+      // The list names each use case, not only its id.
+      expect(await pane.find({ type: 'Text', text: /^Buy as a guest$/ })).toBeDefined()
       await pane.press({ key: 'uc-uc-buy-as-a-guest' })
       expect(await pane.find({ type: 'Text', text: /^Buy as a guest$/ })).toBeDefined()
       expect(await pane.find({ type: 'Text', text: /^high risk$/ })).toBeDefined()
@@ -546,6 +548,25 @@ describe('assurance', () => {
     expect(w.prompts.length).toBe(1)
     expect(w.prompts[0]).toContain('kane-cli cover gaps uc-buy-as-a-guest')
     expect(w.prompts[0]).toContain('kane-cli design tests --use-case uc-buy-as-a-guest')
+    await pane.unmount()
+  })
+})
+
+describe('a use case whose gaps share one reason', () => {
+  test('says the reason and the next command once, under the list', async ($, on) => {
+    const row = (title: string) => ({ stage: 'cover', title, why: 'a covering test exists but has not run yet', ready_command: 'kane-cli testrun run' })
+    const w = world(on, {
+      cover: JSON.stringify({ design_completeness: { pct: 100 }, proven: { pct: 50 }, usecases: [{ id: 'uc-1', title: 'Buy as a guest', risk: 'high', design_completeness: { pct: 100 }, proven: { pct: 50 }, stale_acs: 0, pending: [row('A placed order displays an order number.'), row('A placed order empties the cart.')] }] }),
+    })
+    w.files[`${PROJECT}/.context/commits/1`] = 'x'
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.settle()
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    await pane.press({ key: 'tab-assure' })
+    await pane.press({ key: 'uc-uc-1' })
+    expect(await pane.find({ type: 'Text', text: /A placed order empties the cart/ })).toBeDefined()
+    expect((await pane.findAll({ type: 'Text', text: /^a covering test exists but has not run yet$/ })).length).toBe(1)
+    expect((await pane.findAll({ type: 'Text', text: /^kane-cli testrun run$/ })).length).toBe(1)
     await pane.unmount()
   })
 })

@@ -339,6 +339,8 @@ function useCaseView(ui: Kit, press: Press, u: UseCase) {
   const group = (stage: 'design' | 'cover', title: string) => {
     const rows = u.pending.filter(p => p.stage === stage)
     if (!rows.length) return null
+    // Rows that share one reason and one next command say them once, under the list.
+    const shared = rows.length > 1 && rows.every(p => p.why === rows[0]!.why && p.command === rows[0]!.command)
     return (
       <ui.Box key={`owed-${stage}`} flexDirection="column">
         <ui.Text bold>{title}</ui.Text>
@@ -350,12 +352,16 @@ function useCaseView(ui: Kit, press: Press, u: UseCase) {
                 <ui.Text>{p.title}</ui.Text>
               </ui.Box>
             </ui.Box>
-            <ui.Box flexDirection="column" paddingLeft={2}>
-              {p.why ? fact(ui, 'why', p.why) : null}
-              {p.command ? fact(ui, 'next', p.command, C.purple) : null}
-            </ui.Box>
+            {shared ? null : (
+              <ui.Box flexDirection="column" paddingLeft={2}>
+                {p.why ? fact(ui, 'why', p.why) : null}
+                {p.command ? fact(ui, 'next', p.command, C.purple) : null}
+              </ui.Box>
+            )}
           </ui.Box>
         ))}
+        {shared && rows[0]!.why ? fact(ui, 'why', rows[0]!.why) : null}
+        {shared && rows[0]!.command ? fact(ui, 'next', rows[0]!.command, C.purple) : null}
         <ui.Text> </ui.Text>
       </ui.Box>
     )
@@ -457,6 +463,11 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: str
         <ui.Box key={`uc-${u.id}`} flexDirection="column" borderStyle="round" borderColor={C.dim} paddingX={1}>
           <ui.Box flexDirection="row" gap={1}>
             <ui.Button key={`uc-${u.id}`} label={u.id} plain onPress={() => press(`uc:${u.id}`)} />
+            {u.title ? (
+              <ui.Box flexShrink={1}>
+                <ui.Text>{u.title}</ui.Text>
+              </ui.Box>
+            ) : null}
             {debt(u).map(s => text(ui, s))}
           </ui.Box>
           <ui.Box flexDirection="row" gap={1}>
