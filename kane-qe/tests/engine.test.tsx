@@ -23,11 +23,11 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown> }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
-  const state: World = { files: {}, alive: new Set(), prompts: [], ignored: new Set(), ...w }
+  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], rows: [], ignored: new Set(), ...w }
   const clock = mock.clock(on, { now: T0 })
   mock.store(on, state.store)
   mock.env(on, { HOME })
@@ -50,6 +50,8 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
   on('fs.stat', ($, e) => (e.path in state.files ? { value: { kind: 'file', size: state.files[e.path]!.length, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
   on('process.run', ($, e) => {
     const argv = e.argv
+    state.ran.push([...argv])
+    if (argv[0] === 'open') return OK('') as never
     if (argv[0] === 'kill') return OK('', state.alive.has(Number(argv[2])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'check-ignore') return OK('', state.ignored.has(String(argv[3])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'diff') return OK('+ postcode.trim()') as never
@@ -58,6 +60,21 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
   })
   on('tool.call', ($, e) => ({ result: (e as { tool?: string }).tool === 'Bash' && state.bashResult ? state.bashResult : { ok: true } }) as never)
   on('classic.Stop', () => ({}) as never)
+  // kane-cli's evidence viewer: it prints its link and keeps serving.
+  on('process.spawn', async function* ($: unknown, e: { argv: readonly string[] }) {
+    state.ran.push([...e.argv])
+    if (state.viewer) yield { stream: 'stdout', text: `serving 1 pack on http://127.0.0.1:5173\npack.evidence\n  pack    http://127.0.0.1:5173/t/p\n  viewer  ${state.viewer}\npress Ctrl-C to stop\n` } as never
+    // A viewer that started keeps serving; one that could not start exits.
+    if (state.viewer) await new Promise(() => undefined)
+    return { value: { code: 2, signal: null } } as never
+  } as never)
+  on('ui.toast', () => ({ value: {} }) as never)
+  // The engine's own row, where the mod leaves a row alone.
+  on('ui.render', ($, e) => {
+    state.rows.push({ component: e.component, isExpanded: (e.props as { isExpanded?: boolean }).isExpanded })
+    const { Text } = $.ui.resolve(e)
+    return (<Text>{`engine ${e.component}`}</Text>) as never
+  })
   return Object.assign(state, { clock })
 }
 
@@ -530,5 +547,200 @@ describe('assurance', () => {
     expect(w.prompts[0]).toContain('kane-cli cover gaps uc-buy-as-a-guest')
     expect(w.prompts[0]).toContain('kane-cli design tests --use-case uc-buy-as-a-guest')
     await pane.unmount()
+  })
+})
+
+describe('the card in the chat', () => {
+  const CMD = 'kane-cli testmd run .testmuai/tests/checkout_guest_test.md --agent --headless'
+  const row = (component: 'ToolUse' | 'ToolResult', id: string, command: string, more: object = {}) => ({
+    plugin: 'kane-qe',
+    component,
+    requestId: id,
+    props: component === 'ToolUse' ? { tool_use_id: id, tool: 'Bash', input: { command }, isRunning: false, isErrored: false, isInterrupted: false } : { tool_use_id: id, tool: 'Bash', output: { stdout: 'raw kane-cli output', stderr: '' }, isErrored: false },
+    ...more,
+  })
+  const FULL = { viewport: { columns: 100, rows: 40, isFullscreen: true } }
+
+  /** Claude runs a test file; kane-cli starts it. */
+  async function begin($: { session: { start: (a: never) => Promise<unknown> }; tool: { call: (a: never) => Promise<unknown> } }, w: World, id = 'toolu_1') {
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await $.tool.call({ tool: 'Bash', command: CMD, tool_use_id: id } as never)
+    const dir = `${S}/card-1`
+    startRun(w, 71, dir, 'testmd', line({ type: 'stream_start', surface: 'testmd', pid: 71 }) + line({ type: 'test_md_step_start', step_index: 1, heading: 'Fill the shipping address' }, 2))
+    return dir
+  }
+  const fail = (w: World, dir: string) => {
+    w.files[`${dir}/events.ndjson`] +=
+      line({ type: 'run_end', status: 'failed', credits_consumed: 31.2, verdict: { root_cause: 'Postcode field rejects valid input', category: 'functional_defect', severity: 'high', confidence: 0.86 } }, 60) +
+      line({ type: 'test_md_step_end', step_index: 1, status: 'failed', duration_s: 58 }, 60) +
+      line({ type: 'test_md_done', overall_status: 'failed', duration_s: 66 }, 66)
+    w.files[`${dir}/evidence/8f0e.evidence`] = 'pack'
+    endRun(w, 71)
+  }
+
+  test('a run Claude started is one line while it runs, then a card with its result, its steps and its evidence', async ($, on) => {
+    const w = world(on, { viewer: 'https://viewer.example/?pack=p' })
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const live = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface } as never)
+      expect(await live.find({ type: 'Text', text: /^checkout_guest$/ })).toBeDefined()
+      expect(await live.find({ type: 'Text', text: /Fill the shipping address/ })).toBeDefined()
+      expect(await live.find({ key: 'card-evidence' })).toBeUndefined()
+      await live.unmount()
+    }
+    // While it runs, kane-cli's own output still shows.
+    const before = await $.ui.mount({ ...row('ToolResult', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
+    expect(await before.find({ type: 'Text', text: /engine ToolResult/ })).toBeDefined()
+    await before.unmount()
+
+    fail(w, dir)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface } as never)
+      expect(await card.find({ type: 'Text', text: /^✗ failed$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^31\.2 credits$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^Postcode field rejects valid input$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^functional defect · high · 86% sure$/ })).toBeDefined()
+      expect(await card.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
+      expect(await card.find({ key: 'card-steps' })).toBeDefined()
+      expect(await card.find({ key: 'card-evidence' })).toBeDefined()
+      await card.unmount()
+    }
+    // The card stands for the call: its raw output is gone.
+    const after = await $.ui.mount({ ...row('ToolResult', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
+    expect(await after.find({ type: 'Text', text: /engine ToolResult/ })).toBeUndefined()
+    await after.unmount()
+
+    const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
+    await card.press({ key: 'card-evidence' })
+    await w.clock.settle()
+    expect(w.ran.some(a => a.join(' ') === `kane-cli evidence serve ${dir}/evidence/8f0e.evidence`)).toBe(true)
+    expect(w.ran.some(a => a[0] === 'open' && a[1] === 'https://viewer.example/?pack=p')).toBe(true)
+    expect(w.prompts).toEqual([])
+    // A second press reuses the viewer that is already serving.
+    await card.press({ key: 'card-evidence' })
+    await w.clock.settle()
+    expect(w.ran.filter(a => a.includes('serve')).length).toBe(1)
+    expect(w.ran.filter(a => a[0] === 'open').length).toBe(2)
+    await card.press({ key: 'card-steps' })
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    expect(await pane.find({ type: 'Text', text: /^where$/ })).toBeDefined()
+    await pane.unmount()
+    await card.unmount()
+  })
+
+  test('where the chat is printed text, the card ends with the evidence path, not buttons', async ($, on) => {
+    const w = world(on)
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    fail(w, dir)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, { viewport: { columns: 100, rows: 40, isFullscreen: false } }), surface: 'terminal' } as never)
+    expect(await card.find({ type: 'Text', text: /^✗ failed$/ })).toBeDefined()
+    expect(await card.find({ key: 'card-evidence' })).toBeUndefined()
+    expect(await card.find({ key: 'card-steps' })).toBeUndefined()
+    expect(await card.find({ type: 'Text', text: new RegExp(`^${dir}/evidence/8f0e\\.evidence$`) })).toBeDefined()
+    await card.unmount()
+  })
+
+  test('with no viewer to start, View evidence asks Claude instead', async ($, on) => {
+    const w = world(on)
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    fail(w, dir)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
+    await card.press({ key: 'card-evidence' })
+    await w.clock.settle()
+    expect(w.ran.some(a => a[0] === 'open')).toBe(false)
+    expect(w.prompts[0]).toContain(`${dir}/evidence/8f0e.evidence`)
+    await card.unmount()
+  })
+
+  test('other rows keep the engine’s drawing: another command, a kane-cli command that is no run, a run that never started', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await $.tool.call({ tool: 'Bash', command: CMD, tool_use_id: 'toolu_9' } as never)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const cases = [
+      { name: 'another command', id: 'toolu_2', command: 'npm test' },
+      { name: 'a read-only kane-cli command', id: 'toolu_3', command: 'kane-cli cover gaps --json' },
+      { name: 'a run kane-cli never started', id: 'toolu_9', command: CMD },
+    ]
+    for (const c of cases) {
+      for (const component of ['ToolUse', 'ToolResult'] as const) {
+        const r = await $.ui.mount({ ...row(component, c.id, c.command, FULL), surface: 'terminal' } as never)
+        expect(await r.find({ type: 'Text', text: new RegExp(`engine ${component}`) })).toBeDefined()
+        await r.unmount()
+      }
+    }
+  })
+
+  test('a folded group of shell calls is unfolded only when it holds a kane-cli run', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    const group = (commands: string[]) => ({
+      plugin: 'kane-qe',
+      component: 'ToolGroup',
+      requestId: 'g1',
+      surface: 'terminal',
+      props: { calls: commands.map((command, i) => ({ tool_use_id: `t${i}`, tool: 'Bash', input: { command }, isRunning: false, isErrored: false })), isActive: false, isExpanded: false },
+    })
+    const cases = [
+      { commands: ['ls', 'git status'], want: false },
+      { commands: ['kane-cli whoami'], want: false },
+      { commands: ['ls', CMD], want: true },
+      { commands: ['kane-cli run "Search for iPod" --agent'], want: true },
+    ]
+    for (const c of cases) {
+      w.rows.length = 0
+      const g = await $.ui.mount(group(c.commands) as never)
+      expect(w.rows.find(r => r.component === 'ToolGroup')?.isExpanded).toBe(c.want)
+      await g.unmount()
+    }
+  })
+
+  test('a suite’s card counts its tests and names its failures; its pack is the one its execution id names', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    const cmd = 'kane-cli testrun run --tags smoke --agent'
+    await $.tool.call({ tool: 'Bash', command: cmd, tool_use_id: 'toolu_s' } as never)
+    const a = `${PROJECT}/.testmuai/tests/login_test.md`
+    const b = `${PROJECT}/.testmuai/tests/checkout_guest_test.md`
+    startRun(
+      w,
+      81,
+      `${S}/testrun-ex1`,
+      'testrun',
+      line({ type: 'stream_start', surface: 'testrun', pid: 81 }) +
+        line({ type: 'testrun_plan', members: [{ path: a }, { path: b }], parallel: 2 }) +
+        line({ type: 'testrun_member_start', path: a }, 1) +
+        line({ type: 'testrun_member_end', path: a, status: 'passed', duration_s: 20 }, 21) +
+        line({ type: 'testrun_member_start', path: b }, 1) +
+        line({ type: 'testrun_member_end', path: b, status: 'failed', duration_s: 30, failure: { message: 'Postcode field rejects valid input' } }, 31) +
+        line({ type: 'testrun_done', execution_id: 'ex1', overall_status: 'failed' }, 40),
+    )
+    w.files[`${PROJECT}/.testmuai/evidence/ex1.evidence`] = 'pack'
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    endRun(w, 81)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const card = await $.ui.mount({ ...row('ToolUse', 'toolu_s', cmd, FULL), surface: 'terminal' } as never)
+    expect(await card.find({ type: 'Text', text: /^suite · --tags smoke$/ })).toBeDefined()
+    expect(await card.find({ type: 'Text', text: /^1 passed$/ })).toBeDefined()
+    expect(await card.find({ type: 'Text', text: /^1 failed$/ })).toBeDefined()
+    expect(await card.find({ type: 'Text', text: /^✗ checkout_guest$/ })).toBeDefined()
+    expect(await card.find({ type: 'Button', text: /View tests/ }) ?? (await card.find({ key: 'card-steps' }))).toBeDefined()
+    expect(await card.find({ key: 'card-evidence' })).toBeDefined()
+    await card.unmount()
   })
 })

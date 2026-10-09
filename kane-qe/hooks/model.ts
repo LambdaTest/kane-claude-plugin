@@ -204,7 +204,7 @@ export function fold(run: Run, ev: Ev): Run {
         if (lost && m.status === 'pending') return { ...m, status: 'failed' as const, startedAt: ev.at, endedAt: ev.at, failure: { why: run.failure?.why || 'the grid job ended with no result for this test' } }
         return m
       })
-      return { ...run, status, endedAt: ev.at, members }
+      return { ...run, status, endedAt: ev.at, members, ...(ev.executionId ? { executionId: ev.executionId } : {}) }
     }
     case 'remote': {
       const remote = { ...run.remote }
@@ -518,6 +518,44 @@ export function kindLine(r: Run): string | undefined {
   const parts = [f.category?.replace(/_/g, ' '), f.severity, f.confidence !== undefined ? `${Math.round(f.confidence * 100)}% sure` : undefined].filter(Boolean)
   return parts.length ? parts.join(' · ') : undefined
 }
+
+// ── the card in the chat ─────────────────────────────────────────────────
+
+/** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", or a suite's counts. Each part only if kane-cli reported it. */
+export function cardResult(r: Run, now: number): Span[] {
+  const time = fmt(elapsed(r, now))
+  if (r.kind === 'testrun' && r.members) {
+    const c = tally(r.members)
+    const out: Span[] = []
+    if (c.passed) out.push({ t: `${c.passed} passed`, c: C.mint })
+    if (c.failed) out.push({ t: `${c.failed} failed`, c: C.coral })
+    if (c.running) out.push({ t: `${c.running} running`, c: C.cyan })
+    if (c.pending && isLive(r.status)) out.push({ t: `${c.pending} left`, d: true })
+    out.push({ t: time, d: true })
+    return out
+  }
+  const out: Span[] = [{ t: r.status === 'passed' ? '✓ passed' : '✗ failed', c: tone(r.status), b: true }, { t: time, d: true }]
+  if (r.credits !== undefined) out.push({ t: `${Math.round(r.credits * 10) / 10} credits`, d: true })
+  return out
+}
+
+/** The header fitted to `room` cells: the name is cut first, then credits drop, then the time; the status stays. */
+export function cardHeader(r: Run, now: number, room: number): { name: string; result: Span[] } {
+  let result = cardResult(r, now)
+  const width = (list: Span[]) => list.reduce((n, s) => n + [...s.t].length + 3, 0)
+  const min = 12
+  while (result.length > 1 && width(result) + min + 8 > room) result = result.slice(0, -1)
+  return { name: cut(r.label, Math.max(min, room - width(result) - 8)), result }
+}
+
+/** A suite card's failures: three at most, then how many more. */
+export function cardFailures(r: Run): { rows: Run[]; more: number } {
+  const failed = (r.members ?? []).filter(m => m.status === 'failed').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+  return { rows: failed.slice(0, 3), more: Math.max(0, failed.length - 3) }
+}
+
+/** True when a shell command is a kane-cli test run: the only commands that get a card. */
+export const isRunCommand = (command: string): boolean => labelFromCommand(command) !== undefined
 
 // ── assurance ────────────────────────────────────────────────────────────
 

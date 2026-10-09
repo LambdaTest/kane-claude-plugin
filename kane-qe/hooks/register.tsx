@@ -14,7 +14,10 @@ import {
   ORDER,
   band,
   bar,
+  cardFailures,
+  cardHeader,
   currentStep,
+  cells,
   cut,
   debt,
   draftPrompt,
@@ -26,6 +29,7 @@ import {
   gridSince,
   historyDetail,
   historyEntry,
+  isRunCommand,
   isTrackedEdit,
   kindLine,
   labelFromCommand,
@@ -79,7 +83,11 @@ type Watch = { id: string; path: string; pointer?: string; pid?: number; bytes: 
 const watches = new Map<string, Watch>()
 const seenPointers = new Set<string>()
 /** kane-cli commands Claude ran, to name the runs they start. */
-const commands: { label: string; surface: Kind; at: number; used: boolean }[] = []
+const commands: { label: string; surface: Kind; at: number; used: boolean; toolUseId?: string }[] = []
+/** Evidence viewers this session started, by pack: the link each one printed. */
+const viewers = new Map<string, string>()
+/** Ended runs whose evidence pack is still being looked for, by run id: when to stop looking. */
+const seeking = new Map<string, number>()
 let polling = false
 const sites = new Set<string>()
 let frame = 0
@@ -465,6 +473,81 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: str
   )
 }
 
+/** A run Claude started, as a card in the chat in place of its shell row: one line while it runs, then its result. */
+function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean) {
+  const ui: Kit = table
+  if (r.status === 'running' || r.status === 'pending') {
+    const suite = r.kind === 'testrun' && r.members ? cardHeader(r, now, columns).result : undefined
+    return (
+      <ui.Box flexDirection="row" gap={1} marginTop={1}>
+        <ui.Text color={C.cyan}>◉</ui.Text>
+        <ui.Text color={C.purple} bold>
+          kane
+        </ui.Text>
+        <ui.Text dimColor>·</ui.Text>
+        <ui.Text bold>{cut(nm(r), Math.max(12, Math.floor(columns / 3)))}</ui.Text>
+        {suite ? suite.map(s => text(ui, s)) : <ui.Text dimColor>{fmt(elapsed(r, now))}</ui.Text>}
+        {suite ? null : <ui.Text dimColor>·</ui.Text>}
+        {suite ? null : (
+          <ui.Box flexShrink={1}>
+            <ui.Text>{cut(nowText(r), Math.max(10, columns - Math.floor(columns / 3) - 22))}</ui.Text>
+          </ui.Box>
+        )}
+      </ui.Box>
+    )
+  }
+  const width = Math.max(48, Math.min(88, columns - 2))
+  const inner = width - RASTER.columns - 6
+  const head = cardHeader(r, now, inner)
+  const isSuite = r.kind === 'testrun' && !!r.members
+  const failures = isSuite ? cardFailures(r) : undefined
+  const kind = kindLine(r)
+  const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
+  return (
+    <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.mint} paddingX={1}>
+      {mascot(table, surface, false, 0)}
+      <ui.Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
+          <ui.Box flexDirection="row" gap={1} flexShrink={1}>
+            <ui.Text color={C.purple} bold>
+              kane
+            </ui.Text>
+            <ui.Text dimColor>·</ui.Text>
+            <ui.Text bold>{head.name}</ui.Text>
+          </ui.Box>
+          <ui.Box flexDirection="row" gap={1} flexShrink={0}>
+            {head.result.map((s, i) => (i === 0 ? text(ui, s) : <ui.Box flexDirection="row" gap={1}>{[<ui.Text dimColor>·</ui.Text>, text(ui, s)]}</ui.Box>))}
+          </ui.Box>
+        </ui.Box>
+        {isSuite ? item(ui, cells((r.members ?? []).map(m => m.status))) : null}
+        {failures?.rows.map(m => (
+          <ui.Box key={`card-fail-${m.id}`} flexDirection="row" gap={1}>
+            <ui.Text color={C.coral}>{`✗ ${cut(nm(m), 24)}`}</ui.Text>
+            <ui.Text dimColor>{m.failure?.where ? 'failed on' : 'failed'}</ui.Text>
+            <ui.Box flexShrink={1}>
+              <ui.Text>{cut(m.failure?.where ?? m.failure?.why ?? '', Math.max(10, inner - 38))}</ui.Text>
+            </ui.Box>
+          </ui.Box>
+        ))}
+        {failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null}
+        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', r.failure.where) : null}
+        {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
+        {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
+        {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
+        {clickable ? <ui.Text> </ui.Text> : null}
+        {clickable ? (
+          <ui.Box flexDirection="row" gap={1}>
+            {isSuite || r.status === 'failed' ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
+            {r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+          </ui.Box>
+        ) : r.evidence ? (
+          fact(ui, 'evidence', r.evidence)
+        ) : null}
+      </ui.Box>
+    </ui.Box>
+  )
+}
+
 // ── reading kane-cli ─────────────────────────────────────────────────────
 
 /** Opened only by something the person did, and brought to the front: Claude Code opens its Diff pane in the
@@ -505,11 +588,11 @@ async function readNew($: EngineInterface, w: Watch): Promise<string[]> {
 }
 
 /** The label Claude's own command gives a run that started just now in this project. */
-function claimCommand(surface: Kind, started: number): string | undefined {
+function claimCommand(surface: Kind, started: number): { label: string; toolUseId?: string } | undefined {
   const c = [...commands].reverse().find(x => !x.used && x.surface === surface && started >= x.at - 5_000 && started - x.at < 120_000)
   if (!c) return undefined
   c.used = true
-  return c.label
+  return { label: c.label, toolUseId: c.toolUseId }
 }
 
 /** Applies one file's new lines to the runs; reports the runs that just ended. */
@@ -597,20 +680,91 @@ async function poll($: EngineInterface) {
     for (const [k, w] of watches) if (w.done) watches.delete(k)
     if (changed) await update($, runsAtom, () => runs)
     for (const r of ended) await finished($, r)
+    for (const r of ended) seeking.set(r.id, now + 30_000)
+    if (seeking.size) await seekEvidence($, now)
     if (runs.some(r => r.status === 'running' || r.status === 'pending')) await update($, tickAtom, n => n + 1)
   } finally {
     polling = false
   }
 }
 
+/** kane-cli seals a run's evidence pack as it exits: `<session dir>/evidence/<id>.evidence`, and a suite's in the project's store under its execution id. */
+async function findEvidence($: EngineInterface, r: Run): Promise<string | undefined> {
+  if (r.executionId && r.cwd) {
+    const stored = `${r.cwd}/.testmuai/evidence/${r.executionId}.evidence`
+    if (await $.fs.exists(stored).catch(() => false)) return stored
+  }
+  const dir = `${r.sessionDir}/evidence`
+  const packs = (await $.fs.list(dir).catch(() => [])).filter(e => e.kind === 'file' && e.name.endsWith('.evidence'))
+  return packs.length === 1 ? `${dir}/${packs[0]!.name}` : undefined
+}
+
+/** Looks for the pack of each run that just ended, for half a minute at most. */
+async function seekEvidence($: EngineInterface, now: number) {
+  const runs = await read($, runsAtom)
+  const found = new Map<string, string>()
+  for (const [id, until] of seeking) {
+    const r = runs.find(x => x.id === id)
+    const pack = r && !r.evidence ? await findEvidence($, r) : undefined
+    if (pack) found.set(id, pack)
+    if (pack || !r || r.evidence || now > until) seeking.delete(id)
+  }
+  if (found.size) await update($, runsAtom, list => list.map(r => (found.has(r.id) ? { ...r, evidence: found.get(r.id) } : r)))
+}
+
+/** Starts kane-cli's local evidence viewer for a pack and answers the link it prints; the viewer lives until the session ends. */
+function startViewer($: EngineInterface, pack: string): Promise<string | undefined> {
+  return new Promise(resolve => {
+    let said = false
+    const say = (url: string | undefined) => {
+      if (said) return
+      said = true
+      resolve(url)
+    }
+    void $.clock.sleep(15_000).then(() => say(undefined), () => say(undefined))
+    void (async () => {
+      let text = ''
+      try {
+        for await (const piece of $.process.spawn({ argv: [...kane, 'evidence', 'serve', pack], cwd: projectDir })) {
+          text = (text + piece.text).slice(-4000)
+          const link = text.match(/viewer\s+(https?:\/\/\S+)/)
+          if (link && !viewers.has(pack)) {
+            viewers.set(pack, link[1]!)
+            say(link[1])
+          }
+        }
+      } catch {
+        // the viewer could not start: the caller falls back
+      }
+      viewers.delete(pack)
+      say(undefined)
+    })()
+  })
+}
+
+/** One click to a run's evidence: its pack in kane-cli's viewer, in the browser. Without a pack or a viewer, Claude is asked instead. */
+async function openEvidence($: EngineInterface, id: string) {
+  const all = await read($, runsAtom)
+  const r = all.find(x => x.id === id) ?? leaves(all).find(x => x.id === id)
+  const pack = r?.evidence
+  const url = pack ? (viewers.get(pack) ?? (await startViewer($, pack))) : undefined
+  if (url) {
+    const opened = await $.process.run(['open', url], { timeoutMs: 5000 }).catch(() => undefined)
+    if (opened?.exitCode !== 0) await $.process.run(['xdg-open', url], { timeoutMs: 5000 }).catch(() => undefined)
+    $.ui.toast('Evidence opened in the browser')
+    return
+  }
+  void $.prompt.submit({ text: `Open the evidence for the kane-cli run in ${pack ?? r?.sessionDir ?? id}.` }).catch(() => undefined)
+}
+
 function startWatch(runs: Run[], p: Pointer, pointer: string): Run[] {
   const id = p.sessionDir
-  const label = claimCommand(p.surface, p.started)
-  const run = newRun(id, p.surface, p.sessionDir, p.started, { pid: p.pid, cwd: p.cwd, ...(label ? { label, labelRank: RANK.command } : {}) })
+  const claimed = claimCommand(p.surface, p.started)
+  const run = newRun(id, p.surface, p.sessionDir, p.started, { pid: p.pid, cwd: p.cwd, ...(claimed ? { label: claimed.label, labelRank: RANK.command } : {}), ...(claimed?.toolUseId ? { toolUseId: claimed.toolUseId } : {}) })
   // A reload follows the file again from its start, replacing what the last module folded.
   watches.set(id, { id, path: `${p.sessionDir}/events.ndjson`, pointer, pid: p.pid, bytes: 0, rest: '', done: false })
   const keep = runs.find(r => r.id === id)
-  const fresh = keep ? { ...run, label: keep.labelRank && keep.labelRank >= RANK.command ? keep.label : run.label, labelRank: Math.max(keep.labelRank ?? 0, run.labelRank ?? 0) } : run
+  const fresh = keep ? { ...run, toolUseId: run.toolUseId ?? keep.toolUseId, label: keep.labelRank && keep.labelRank >= RANK.command ? keep.label : run.label, labelRank: Math.max(keep.labelRank ?? 0, run.labelRank ?? 0) } : run
   return [...runs.filter(r => r.id !== id), fresh]
 }
 
@@ -742,11 +896,11 @@ function autoInstruction(files: readonly string[], saved: readonly string[], url
 }
 
 /** A kane-cli command Claude is about to run names the run it starts. */
-async function beforeTool($: EngineInterface, e: { tool: string; command?: unknown }) {
+async function beforeTool($: EngineInterface, e: { tool: string; command?: unknown; tool_use_id?: string }) {
   if (e.tool !== 'Bash') return
   const named = labelFromCommand(String(e.command ?? ''))
   if (!named) return
-  commands.push({ ...named, at: await $.clock.now(), used: false })
+  commands.push({ ...named, at: await $.clock.now(), used: false, toolUseId: e.tool_use_id })
   if (commands.length > 20) commands.shift()
 }
 
@@ -826,10 +980,10 @@ async function act($: EngineInterface, a: string) {
     await update($, offerAtom, () => null)
     await update($, changeAtom, c => (c ? { ...c, shown: false } : c))
     await update($, viewAtom, v => ({ ...v, open: '' }))
-  } else if (k === 'evidence') {
-    const r = leaves(await read($, runsAtom)).concat(await read($, runsAtom)).find(x => x.id === arg)
-    const dir = r?.sessionDir || arg
-    void $.prompt.submit({ text: `Open the evidence for the kane-cli run in ${dir}.` }).catch(() => undefined)
+  } else if (k === 'evidence') await openEvidence($, arg)
+  else if (k === 'steps') {
+    await update($, viewAtom, v => ({ ...v, tab: 'runs' as const, open: arg, uc: '' }))
+    await openPane($)
   } else if (k === 'setup') {
     void $.prompt.submit({
       text: 'Set up kane-cli assurance for this project: ask me for the requirement (a PRD file, a Jira, Confluence or Linear link, or a web page), ingest it with kane-cli, extract the use cases and design tests (use --mode agent), then show me the coverage with kane-cli cover gaps.',
@@ -920,6 +1074,34 @@ export const register: Register = (on, options) => {
     if (result.block) return result
     const block = await holdForChange($, e).catch(() => undefined)
     return block ? { ...result, block } : result
+  })
+
+  // A kane-cli run Claude started is drawn as a card in the chat, in place of its shell row.
+  // The chat folds shell calls into one count line: a group holding a run is unfolded, so its row is drawn.
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    if (e.props.isExpanded || !e.props.calls.some(c => c.tool === 'Bash' && isRunCommand(String((c.input as { command?: unknown } | undefined)?.command ?? '')))) return next(e)
+    return next({ ...e, props: { ...e.props, isExpanded: true } })
+  })
+
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (e.props.tool !== 'Bash' || !isRunCommand(String((e.props.input as { command?: unknown } | undefined)?.command ?? ''))) return next(e)
+    const r = (await read($, runsAtom)).find(x => x.toolUseId === e.props.tool_use_id)
+    // No run came of the command (kane-cli refused or failed to start): its own row says why.
+    if (!r) return next(e)
+    await read($, tickAtom)
+    const press: Press = a => void act($, a).catch(() => undefined)
+    // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
+    const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
+    return chatCard($.ui.resolve(e), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
+  })
+
+  // The card stands for the whole call: once the run has a result, kane-cli's raw output is not drawn beneath it.
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (e.props.tool !== 'Bash') return next(e)
+    const r = (await read($, runsAtom)).find(x => x.toolUseId === e.props.tool_use_id)
+    if (!r || (r.status !== 'passed' && r.status !== 'failed')) return next(e)
+    const ui: Kit = $.ui.resolve(e)
+    return <ui.Box />
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

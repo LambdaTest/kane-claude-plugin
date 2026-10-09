@@ -44,6 +44,12 @@ export type Run = {
   labelRank?: number
   /** A suite sent to the remote grid: the grid reports its tests only when the job ends. */
   remote?: Remote
+  /** The chat row of the shell call that started it, when Claude ran it: where its card is drawn. */
+  toolUseId?: string
+  /** A suite's execution id, which names its evidence pack. */
+  executionId?: string
+  /** Its sealed evidence pack on disk, once kane-cli has written it. */
+  evidence?: string
 }
 
 export type Remote = { backend?: string; jobId?: string; jobUrl?: string; dispatchedAt?: number }

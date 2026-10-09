@@ -4,6 +4,10 @@ import { adapt, splitLines } from '../hooks/adapter'
 import type { Ev } from '../hooks/adapter'
 import {
   band,
+  cardFailures,
+  cardHeader,
+  cardResult,
+  isRunCommand,
   featureWords,
   fold,
   foldMember,
@@ -213,6 +217,49 @@ describe('a suite on the remote grid', () => {
   test('a local suite that ends early leaves its unstarted tests waiting', () => {
     const s = fold(suite(['passed', 'pending']), { k: 'suiteDone', status: 'failed', at: T0 + 2000 })
     expect((s.members ?? []).map(m => m.status)).toEqual(['passed', 'pending'])
+  })
+})
+
+describe('the card in the chat', () => {
+  const texts = (r: Run, now = T0 + 70_000) => cardResult(r, now).map(s => s.t)
+  const cases: { name: string; run: Run; want: string[] }[] = [
+    { name: 'a passed run: status, time, credits', run: run('a', 'run', [label('login_test.md'), step(1, 'done', 'Sign in', 3), passed(41)]), want: ['✓ passed', '41s', '12.4 credits'] },
+    { name: 'a failed run with no credits reported shows none', run: run('b', 'run', [label('x'), step(1, 'failed', 'Open', 3), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), want: ['✗ failed', '1m 06s'] },
+    { name: 'a finished suite: its counts and time', run: fold(suite(['passed', 'passed', 'failed']), { k: 'suiteDone', status: 'failed', at: T0 + 90_000 }), want: ['2 passed', '1 failed', '1m 30s'] },
+    { name: 'a suite still going says what is left', run: suite(['passed', 'running', 'pending']), want: ['1 passed', '1 running', '1 left', '1m 10s'] },
+  ]
+  for (const c of cases) test(c.name, () => expect(texts(c.run)).toEqual(c.want))
+
+  test('the header fits its room: the name is cut, then credits and time drop, the status stays', () => {
+    const r = run('a', 'run', [label('a-very-long-test-name-that-will-not-fit-anywhere_test.md'), step(1, 'done', 'Sign in', 3), passed(41)])
+    const wide = cardHeader(r, T0 + 50_000, 120)
+    expect(wide.name).toBe('a-very-long-test-name-that-will-not-fit-anywhere_test.md')
+    expect(wide.result.map(s => s.t)).toEqual(['✓ passed', '41s', '12.4 credits'])
+    const mid = cardHeader(r, T0 + 50_000, 50)
+    expect(mid.name.endsWith('…')).toBe(true)
+    expect(mid.result[0]!.t).toBe('✓ passed')
+    const narrow = cardHeader(r, T0 + 50_000, 30)
+    expect(narrow.result.map(s => s.t)).toEqual(['✓ passed'])
+  })
+
+  test('a suite’s card names three failures at most, newest first, then how many more', () => {
+    const s = fold(suite(['failed', 'failed', 'failed', 'failed', 'failed', 'passed']), { k: 'suiteDone', status: 'failed', at: T0 + 90_000 })
+    const f = cardFailures(s)
+    expect(f.rows.length).toBe(3)
+    expect(f.more).toBe(2)
+    expect(cardFailures(suite(['passed'])).rows).toEqual([])
+  })
+
+  test('only kane-cli test runs get a card', () => {
+    const cases: [string, boolean][] = [
+      ['kane-cli run "Search for iPod" --agent', true],
+      ['cd app && kane-cli testmd run .testmuai/tests/login_test.md --agent', true],
+      ['kane-cli testrun run --tags smoke', true],
+      ['kane-cli cover gaps --json', false],
+      ['kane-cli whoami', false],
+      ['npm test', false],
+    ]
+    for (const [command, want] of cases) expect(isRunCommand(command)).toBe(want)
   })
 })
 

@@ -5,7 +5,7 @@ The design ([kane-cli mod: terminal build guide](https://claude.ai/artifact/5Dkz
 How each item was checked:
 - **live**: in a real Claude Code session in a terminal, with a real kane-cli run;
 - **staged**: a real Claude Code session, with kane-cli runs written to disk in kane-cli 0.8.20's own format, by `sleep` processes standing in for kane-cli;
-- **test**: `claude plugin test kane-qe` (103 tests).
+- **test**: `claude plugin test kane-qe` (116 tests).
 
 ## Features (design part 1, "What to build")
 
@@ -41,11 +41,11 @@ Two differences, both deliberate:
 
 | Rule | v2 |
 |---|---|
-| The mod watches; it never starts a test | It runs only `kane-cli cover gaps --json`, `kill -0`, `git check-ignore` and `git diff`; tests are run by Claude, through prompts the person's buttons send |
+| The mod watches; it never starts a test | It runs `kane-cli cover gaps --json`, `kill -0`, `git check-ignore` and `git diff`, and on *View evidence* `kane-cli evidence serve` and `open`; tests are run by Claude, through prompts the person's buttons send |
 | Structured data only | Pointer JSON and `events.ndjson` lines; kane-cli's human output is never read |
 | No guesses on screen | What kane-cli does not report is left out (step totals, credits while running, balance, browser) |
 | Ignore what you do not know | `adapter.ts` dispatches on known types and skips the rest |
-| Every behaviour has a test; README changes with it | 103 tests; both READMEs describe v2 |
+| Every behaviour has a test; README changes with it | 116 tests; both READMEs describe v2 |
 | Code shape: sources → adapter → model → views | `sources.ts`, `adapter.ts` (only place raw field names appear), `model.ts` (pure), `register.tsx` |
 | Faults 1–5 in the prototype | All fixed: wrapped text keeps its column, waiting markers in the dim colour, card borders in the dim colour, cuts sized from the pane width, no background on band or pane |
 
@@ -66,17 +66,18 @@ Two differences, both deliberate:
 
 ## Added after the design
 
-Three things the design did not ask for, each checked by **test** only (not yet in a live session):
+Four things the design did not ask for, each checked by **test** only (not yet in a live session, except that a trial card with fake data was drawn and clicked in a fullscreen terminal):
 
 | Addition | What it does |
 |---|---|
 | Remote suites | `kane-cli testrun run --remote`: the grid reports its tests only when the job ends, so until then the band reads `12 tests on the grid · sent 2m ago` and the pane gives the grid, the job and its link. A job that fails before any test reports gives every test that reason |
 | Use-case detail | Press a use case on the Assurance tab: its title and risk, what it owes to design and to run, kane-cli's reason and next command for each, and *Close these gaps with Claude* |
+| Card in the chat | A kane-cli test Claude runs is drawn in the conversation as a card in place of its shell row: one line while it runs, then the result, a failure's on/why/kind or a suite's counts, *View steps* and *View evidence*. *View evidence* opens the pack in kane-cli's viewer in one click, which is the one time the mod starts a kane-cli command other than `cover gaps`. Printed chats (terminal outside fullscreen) get the evidence path instead of buttons |
 | History tab | The last 30 finished runs in this project (it was 10, shown only as `last run …`), with when, how long, and where each failed or a suite's counts. `/kane history` opens it |
 
 ## Not checked
 
-- **The three additions above in a live session.** The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
+- **The four additions above in a live session.** The card's evidence button has never opened a real pack. The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
 
 - **The desktop app.** The band and pane are mounted on the desktop surface in tests (the mascot as an image there), but not opened in the app itself.
 - **The light palette in a live session**: switching a session's theme changes the person's global setting, so it is covered by a test only.
