@@ -302,7 +302,8 @@ export type Span = { t: string; c?: string; bg?: string; b?: boolean; d?: boolea
 /** One piece of a row; an array is drawn with no gap between its spans. */
 export type Item = Span | Span[]
 export type RowButton = { key: string; label: string; act: string }
-export type Row = { items: Item[]; button?: RowButton }
+/** `spin`: the row is what a running test is doing now, drawn behind a spinner. */
+export type Row = { items: Item[]; button?: RowButton; spin?: boolean }
 export type Band = { think: boolean; rows: [Row, Row, Row] }
 export type BandOptions = {
   assurance: Assurance
@@ -376,7 +377,7 @@ function nowRow(live: readonly Run[], now: number, room: number): Row {
     shown += 1
   }
   if (shown < live.length) items.push(dim(`· +${live.length - shown} more`))
-  return { items }
+  return { items, spin: live.length > 0 }
 }
 
 function failRow(r: Run, room: number): Row {
@@ -404,7 +405,7 @@ const itemWidth = (i: Item): number => (Array.isArray(i) ? i.reduce((n, s) => n 
 
 /** Cells a row takes as drawn: items one cell apart, a button as `[ label ]`. */
 export function rowWidth(r: Row): number {
-  const parts = r.items.map(itemWidth).concat(r.button ? [r.button.label.length + 4] : [])
+  const parts = (r.spin ? [1] : []).concat(r.items.map(itemWidth), r.button ? [r.button.label.length + 4] : [])
   return parts.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1)
 }
 
@@ -462,7 +463,7 @@ function pickBand(runs: readonly Run[], o: BandOptions): Band {
       think,
       rows: [
         { items: [chip('running', true), { t: cut(nm(only), Math.max(12, room - 24)), b: true }, dim(fmt(elapsed(only, o.now)))], button: open },
-        { items: [only.waiting ? { t: cut(step, room), c: C.orange } : { t: cut(step, room) }] },
+        only.waiting ? { items: [{ t: cut(step, room), c: C.orange }] } : { items: [{ t: cut(step, room - 2) }], spin: true },
         assuranceRow(o.assurance),
       ],
     }

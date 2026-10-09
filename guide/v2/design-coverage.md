@@ -5,7 +5,7 @@ The design ([kane-cli mod: terminal build guide](https://claude.ai/artifact/5Dkz
 How each item was checked:
 - **live**: in a real Claude Code session in a terminal, with a real kane-cli run;
 - **staged**: a real Claude Code session, with kane-cli runs written to disk in kane-cli 0.8.20's own format, by `sleep` processes standing in for kane-cli;
-- **test**: `claude plugin test kane-qe` (122 tests).
+- **test**: `claude plugin test kane-qe` (127 tests).
 
 ## Features (design part 1, "What to build")
 
@@ -45,7 +45,7 @@ Two differences, both deliberate:
 | Structured data only | Pointer JSON and `events.ndjson` lines; kane-cli's human output is never read |
 | No guesses on screen | What kane-cli does not report is left out (step totals, credits while running, balance, browser) |
 | Ignore what you do not know | `adapter.ts` dispatches on known types and skips the rest |
-| Every behaviour has a test; README changes with it | 122 tests; both READMEs describe v2 |
+| Every behaviour has a test; README changes with it | 127 tests; both READMEs describe v2 |
 | Code shape: sources → adapter → model → views | `sources.ts`, `adapter.ts` (only place raw field names appear), `model.ts` (pure), `register.tsx` |
 | Faults 1–5 in the prototype | All fixed: wrapped text keeps its column, waiting markers in the dim colour, card borders in the dim colour, cuts sized from the pane width, no background on band or pane |
 

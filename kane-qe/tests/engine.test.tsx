@@ -622,6 +622,13 @@ describe('the card in the chat', () => {
     await w.clock.settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       const live = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface } as never)
+      // A spinner leads the line: a cell repainted in place on a terminal, a glyph elsewhere.
+      if (surface === 'terminal') expect(await live.find({ type: 'Raster', key: 'spin' })).toBeDefined()
+      else expect(await live.find({ type: 'Text', text: /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/ })).toBeDefined()
+      const band = await $.ui.mount({ ...BAND, surface } as never)
+      if (surface === 'terminal') expect(await band.find({ type: 'Raster', key: 'spin' })).toBeDefined()
+      else expect(await band.find({ type: 'Text', text: /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/ })).toBeDefined()
+      await band.unmount()
       expect(await live.find({ type: 'Text', text: /^checkout_guest$/ })).toBeDefined()
       expect(await live.find({ type: 'Text', text: /Fill the shipping address/ })).toBeDefined()
       expect(await live.find({ key: 'card-evidence' })).toBeUndefined()
@@ -651,7 +658,12 @@ describe('the card in the chat', () => {
     expect(await after.find({ type: 'Text', text: /engine ToolResult/ })).toBeUndefined()
     await after.unmount()
 
+    // Once it has ended nothing spins: not the card, not the band.
+    const idle = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect(await idle.find({ key: 'spin' })).toBeUndefined()
+    await idle.unmount()
     const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
+    expect(await card.find({ key: 'spin' })).toBeUndefined()
     await card.press({ key: 'card-evidence' })
     await w.clock.settle()
     expect(w.ran.some(a => a.join(' ') === `kane-cli evidence serve ${dir}/evidence/8f0e.evidence`)).toBe(true)

@@ -101,6 +101,11 @@ export function rasterCells(frame: Frame): string {
       else words.push(SPACE, DEFAULT, DEFAULT)
     }
   }
+  return pack(words)
+}
+
+/** Cell words (code point, foreground, background) as a Raster takes them: little-endian u32s, base64. */
+function pack(words: readonly number[]): string {
   const bytes = new Uint8Array(words.length * 4)
   words.forEach((w, i) => {
     bytes[i * 4] = w & 255
@@ -109,6 +114,14 @@ export function rasterCells(frame: Frame): string {
     bytes[i * 4 + 3] = (w >> 24) & 255
   })
   return base64(bytes)
+}
+
+/** The spinner drawn before a step while its test runs: one cell, stepping with the mascot. */
+const SPIN = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
+export const spinnerGlyph = (n: number): string => SPIN[((n % SPIN.length) + SPIN.length) % SPIN.length]!
+/** That spinner as a one-cell terminal Raster, in `color` (`#rrggbb`). */
+export function spinnerCells(n: number, color: string): string {
+  return pack([spinnerGlyph(n).codePointAt(0)!, Number.parseInt(color.slice(1), 16), DEFAULT])
 }
 
 export const RASTER = { columns: MASCOT.width, rows: MASCOT.height / 2 } as const

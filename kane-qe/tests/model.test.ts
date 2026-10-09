@@ -264,6 +264,27 @@ describe('the card in the chat', () => {
   })
 })
 
+describe('the running step', () => {
+  const spins = (runs: Run[], o: Partial<BandOptions> = {}) => band(runs, opts(o)).rows.map(r => r.spin === true)
+
+  test('one run: its step is drawn behind a spinner; nothing else is', () => {
+    expect(spins([one()])).toEqual([false, true, false])
+  })
+  test('a run waiting on a question is not spinning', () => {
+    expect(spins([fold(one(), { k: 'ask', question: 'Which account?', at: T0 + 7000 })])).toEqual([false, false, false])
+  })
+  test('a suite: the now row spins, a failure row does not', () => {
+    expect(spins([suite(['passed', 'running', 'pending'])])).toEqual([false, true, false])
+    expect(spins([suite(['failed', 'running', 'pending'])])).toEqual([false, false, false])
+  })
+  test('idle: nothing spins', () => {
+    expect(spins([loginPassed()])).toEqual([false, false, false])
+  })
+  test('the spinner is part of the row’s width', () => {
+    for (const columns of [60, 80, 120]) for (const row of band([one()], opts({ columns })).rows) expect(rowWidth(row) <= columns).toBe(true)
+  })
+})
+
 describe('a test run more than once', () => {
   const failedThen = (later: Ev[]) => [checkoutFailed(), run('co2', 'run', [label('checkout_guest_test.md'), step(1, 'done', 'Open the cart', 5), ...later], T0 - 300_000)]
 

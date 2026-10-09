@@ -76,7 +76,7 @@ What it never does: it never starts a kane-cli test, and never shows what kane-c
 ```
 claude plugin validate kane-qe --strict     # the plugin: manifest, hooks, state contract
 claude plugin validate . --strict           # the marketplace manifest
-claude plugin test kane-qe                  # 122 tests
+claude plugin test kane-qe                  # 127 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same on every push to `main` and on pull requests.

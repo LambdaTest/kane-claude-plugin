@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells } from './mascot'
+import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -92,6 +92,8 @@ const viewers = new Map<string, string>()
 const seeking = new Map<string, number>()
 let polling = false
 const sites = new Set<string>()
+/** Sites that draw the running-step spinner: repainted in place with the mascot. */
+const spinSites = new Set<string>()
 let frame = 0
 let thinking = false
 let remote = false
@@ -111,10 +113,18 @@ function text(ui: Kit, s: Span) {
 
 const item = (ui: Kit, i: Item) => (Array.isArray(i) ? <ui.Box flexDirection="row">{i.filter(s => s.t !== '').map(s => text(ui, s))}</ui.Box> : text(ui, i))
 
-function line(ui: Kit, press: Press, r: Row) {
+// A step while its test runs: a spinner in front, so it reads as work in progress and not as a sentence.
+// One cell repainted in place on a terminal; a glyph that steps with each redraw elsewhere.
+function spinner(table: Table, surface: RenderSurface, n: number) {
+  if (surface === 'terminal' && 'Raster' in table) return <table.Raster key="spin" columns={1} rows={1} cells={spinnerCells(n, C.cyan)} />
+  return <table.Text color={C.cyan}>{spinnerGlyph(n)}</table.Text>
+}
+
+function line(ui: Kit, press: Press, r: Row, lead?: ReturnType<typeof spinner>) {
   if (r.items.length === 0 && !r.button) return <ui.Text> </ui.Text>
   return (
     <ui.Box flexDirection="row" gap={1}>
+      {r.spin && lead ? lead : null}
       {r.items.map(i => item(ui, i))}
       {r.button ? <ui.Button key={r.button.key} label={r.button.label} variant="primary" onPress={() => press(r.button?.act ?? '')} /> : null}
     </ui.Box>
@@ -496,7 +506,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
     const suite = r.kind === 'testrun' && r.members ? cardHeader(r, now, columns).result : undefined
     return (
       <ui.Box flexDirection="row" gap={1} marginTop={1}>
-        <ui.Text color={C.cyan}>◉</ui.Text>
+        {spinner(table, surface, frame)}
         <ui.Text color={C.purple} bold>
           kane
         </ui.Text>
@@ -1027,6 +1037,8 @@ function paint($: EngineInterface) {
   if (!remote) frame += 1
   const cells = rasterCells(pixelFrame(poseAt(true, frame)))
   for (const requestId of sites) void $.ui.blit({ requestId, key: 'mascot', cells }).catch(() => sites.delete(requestId))
+  const spin = spinnerCells(frame, C.cyan)
+  for (const requestId of spinSites) void $.ui.blit({ requestId, key: 'spin', cells: spin }).catch(() => spinSites.delete(requestId))
 }
 
 // ── the mod ──────────────────────────────────────────────────────────────
@@ -1114,6 +1126,8 @@ export const register: Register = (on, options) => {
     const press: Press = a => void act($, a).catch(() => undefined)
     // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
     const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
+    if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
+    else spinSites.delete(e.requestId)
     return chatCard($.ui.resolve(e), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
   })
 
@@ -1141,11 +1155,13 @@ export const register: Register = (on, options) => {
     const table = $.ui.resolve(e)
     if (e.surface === 'terminal') sites.add(e.requestId)
     else remote = true
+    if (e.surface === 'terminal' && model.rows.some(r => r.spin)) spinSites.add(e.requestId)
+    else spinSites.delete(e.requestId)
     const press: Press = a => void act($, a).catch(() => undefined)
     return (
       <table.Box flexDirection="row" gap={1}>
         {mascot(table, e.surface, model.think, frame)}
-        <table.Box flexDirection="column">{model.rows.map(r => line(table, press, r))}</table.Box>
+        <table.Box flexDirection="column">{model.rows.map(r => line(table, press, r, spinner(table, e.surface, frame)))}</table.Box>
       </table.Box>
     )
   })
