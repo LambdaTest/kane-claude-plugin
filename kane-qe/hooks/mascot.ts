@@ -8,7 +8,7 @@ export type Pose = 'c' | 'lm' | 'l' | 'rm' | 'r' | 'xh' | 'x'
 export type Frame = readonly string[]
 
 /** The length of one step of the loop, in ms. */
-export const STEP_MS = 130
+export const STEP_MS = 120
 /** The loop follows the GIF: rest, glance left, glance right, rest, blink, rest. */
 const LOOP: readonly Pose[] = ['c', 'c', 'c', 'c', 'lm', 'l', 'l', 'l', 'lm', 'rm', 'r', 'r', 'r', 'r', 'rm', 'c', 'c', 'c', 'x', 'c', 'c', 'c']
 
