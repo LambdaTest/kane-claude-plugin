@@ -1,0 +1,26 @@
+{
+  "name": "lambdatest",
+  "owner": {
+    "name": "LambdaTest"
+  },
+  "metadata": {
+    "description": "LambdaTest plugins for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "kane-qe",
+      "source": "./kane-qe",
+      "description": "Watches kane-cli (KaneAI) runs in Claude Code: a band above the prompt with the kane mascot, a pane for runs, steps, failures and assurance coverage, and a nudge to test what Claude just changed.",
+      "version": "2.0.0",
+      "category": "testing",
+      "keywords": [
+        "kaneai",
+        "kane-cli",
+        "lambdatest",
+        "testing",
+        "qa",
+        "browser-testing"
+      ]
+    }
+  ]
+}

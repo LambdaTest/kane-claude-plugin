@@ -1,0 +1,40 @@
+{
+  "name": "kane-qe",
+  "version": "2.0.0",
+  "description": "Watches kane-cli (KaneAI) runs in Claude Code: a band above the prompt with the kane mascot, a pane for runs, steps, failures and assurance coverage, and a nudge to test what Claude just changed",
+  "author": {
+    "name": "Siraj K"
+  },
+  "homepage": "https://github.com/LambdaTest/kane-claude-plugin",
+  "repository": "https://github.com/LambdaTest/kane-claude-plugin",
+  "license": "MIT",
+  "keywords": [
+    "kaneai",
+    "kane-cli",
+    "lambdatest",
+    "testing",
+    "qa",
+    "browser-testing",
+    "e2e"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "afterChange": {
+      "type": "string",
+      "title": "After Claude changes code",
+      "description": "offer: show a Test this change button. auto: Claude tests the change before it finishes. off: do nothing.",
+      "options": [
+        "offer",
+        "auto",
+        "off"
+      ],
+      "default": "offer"
+    },
+    "kaneCommand": {
+      "type": "string",
+      "title": "kane-cli command",
+      "description": "How to launch kane-cli for read-only checks (cover gaps), split on spaces",
+      "default": "kane-cli"
+    }
+  }
+}
