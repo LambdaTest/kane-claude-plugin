@@ -3,13 +3,14 @@
 // The mod never starts a test: Claude runs kane-cli, the mod reads what kane-cli leaves on disk.
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderSurface, TextProps } from 'claude-code'
-import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, Status, Step, View } from '../types'
+import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, Status, Step, UseCase, View } from '../types'
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
 import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells } from './mascot'
 import {
   C,
+  HISTORY_MAX,
   ORDER,
   band,
   bar,
@@ -21,6 +22,10 @@ import {
   fmt,
   fold,
   foldMember,
+  gapsPrompt,
+  gridSince,
+  historyDetail,
+  historyEntry,
   isTrackedEdit,
   kindLine,
   labelFromCommand,
@@ -29,6 +34,7 @@ import {
   nm,
   nowText,
   objectiveFrom,
+  onGrid,
   parseCoverGaps,
   ago,
   savedTestsFor,
@@ -51,6 +57,7 @@ const changeAtom = atom({ plugin: 'kane-qe', key: 'change' } as const, null as C
 const offerAtom = atom({ plugin: 'kane-qe', key: 'offer' } as const, null as Offer | null)
 const modeAtom = atom({ plugin: 'kane-qe', key: 'mode' } as const, '' as '' | AfterChange)
 const lastAtom = atom({ plugin: 'kane-qe', key: 'last' } as const, null as HistoryEntry | null)
+const historyAtom = atom({ plugin: 'kane-qe', key: 'history' } as const, [] as HistoryEntry[])
 
 type Kit = Pick<Elements['mobile'], 'Box' | 'Text' | 'Button'>
 type Table = Elements[RenderSurface]
@@ -133,7 +140,7 @@ const meta = (r: Run) => [r.kind, r.target].filter(Boolean).join(' · ')
 function runCard(ui: Kit, press: Press, r: Run, now: number, width: number) {
   const isSuite = r.kind === 'testrun' && r.members
   const c = isSuite ? tally(r.members ?? []) : undefined
-  const second = c ? `${c.passed + c.failed} of ${c.total} tests done${c.running ? ` · ${c.running} running` : ''}${c.failed ? ` · ${c.failed} failed` : ''}` : summary(r)
+  const second = c ? (onGrid(r) ? `${c.total} test${c.total === 1 ? '' : 's'} on the grid · ${gridSince(r, now)}` : `${c.passed + c.failed} of ${c.total} tests done${c.running ? ` · ${c.running} running` : ''}${c.failed ? ` · ${c.failed} failed` : ''}`) : summary(r)
   return (
     <ui.Box key={`card-${r.id}`} flexDirection="column" borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.dim} paddingX={1}>
       <ui.Box flexDirection="row" gap={1}>
@@ -164,6 +171,18 @@ const sortRuns = (list: readonly Run[]) => [...list].sort((a, b) => ORDER[a.stat
 /** A suite's tests by state, each state in the plan's order. */
 const sortMembers = (list: readonly Run[]) => list.map((m, i) => ({ m, i })).sort((a, b) => ORDER[a.m.status] - ORDER[b.m.status] || a.i - b.i).map(x => x.m)
 
+/** Where a remote suite is running: the grid, its job, and why nothing moves until it ends. */
+function gridFacts(ui: Kit, s: Run) {
+  const r = s.remote ?? {}
+  return (
+    <ui.Box flexDirection="column">
+      {fact(ui, 'grid', [r.backend ?? 'remote', r.jobId ? `job ${r.jobId}` : ''].filter(Boolean).join(' · '))}
+      {r.jobUrl ? fact(ui, 'link', r.jobUrl) : null}
+      {onGrid(s) ? <ui.Text dimColor>The grid reports each test when the job ends. Open the link to watch it there.</ui.Text> : null}
+    </ui.Box>
+  )
+}
+
 function suiteView(ui: Kit, press: Press, s: Run, now: number, width: number, back: boolean) {
   const c = tally(s.members ?? [])
   return (
@@ -172,7 +191,8 @@ function suiteView(ui: Kit, press: Press, s: Run, now: number, width: number, ba
         {back ? <ui.Button key="back" label="‹ Runs" plain dimColor onPress={() => press('back')} /> : null}
         <ui.Text bold>{cut(s.label, width - 10)}</ui.Text>
       </ui.Box>
-      <ui.Text dimColor>{c.total ? `${c.passed + c.failed} of ${c.total} done · ${c.running} running · ${c.pending} waiting` : 'planning the suite'}</ui.Text>
+      <ui.Text dimColor>{onGrid(s) ? `${c.total ? `${c.total} test${c.total === 1 ? '' : 's'} on the grid · ` : ''}${gridSince(s, now)}` : c.total ? `${c.passed + c.failed} of ${c.total} done · ${c.running} running · ${c.pending} waiting` : 'planning the suite'}</ui.Text>
+      {s.remote ? gridFacts(ui, s) : null}
       <ui.Text> </ui.Text>
       {sortMembers(s.members ?? []).map(m => memberRow(ui, press, m, now, width))}
     </ui.Box>
@@ -303,8 +323,96 @@ function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null
   )
 }
 
-function assureView(ui: Kit, press: Press, a: Assurance, now: number) {
+/** One use case: its bars, then what it still owes, to design first and to run after, each with kane-cli's own next command. */
+function useCaseView(ui: Kit, press: Press, u: UseCase) {
+  const pct = (n: number | undefined) => (n === undefined ? '   –' : `${String(n).padStart(3)}%`)
+  const listed = u.pending.length
+  const owed = u.toDesign + u.toCover
+  const group = (stage: 'design' | 'cover', title: string) => {
+    const rows = u.pending.filter(p => p.stage === stage)
+    if (!rows.length) return null
+    return (
+      <ui.Box key={`owed-${stage}`} flexDirection="column">
+        <ui.Text bold>{title}</ui.Text>
+        {rows.map((p, i) => (
+          <ui.Box key={`owed-${stage}-${i}`} flexDirection="column">
+            <ui.Box flexDirection="row" gap={1}>
+              <ui.Text color={p.risk === 'high' ? C.coral : C.dim}>{p.risk === 'high' ? '▲' : '·'}</ui.Text>
+              <ui.Box flexShrink={1}>
+                <ui.Text>{p.title}</ui.Text>
+              </ui.Box>
+            </ui.Box>
+            <ui.Box flexDirection="column" paddingLeft={2}>
+              {p.why ? fact(ui, 'why', p.why) : null}
+              {p.command ? fact(ui, 'next', p.command, C.purple) : null}
+            </ui.Box>
+          </ui.Box>
+        ))}
+        <ui.Text> </ui.Text>
+      </ui.Box>
+    )
+  }
+  return (
+    <ui.Box flexDirection="column">
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Button key="uc-back" label="‹ Assurance" plain dimColor onPress={() => press('uc-back')} />
+        <ui.Text bold>{u.id}</ui.Text>
+      </ui.Box>
+      {u.title ? <ui.Text>{u.title}</ui.Text> : null}
+      <ui.Box flexDirection="row" gap={1}>
+        {u.risk ? <ui.Text color={u.risk === 'high' ? C.coral : C.dim}>{`${u.risk} risk`}</ui.Text> : null}
+        {debt(u).map(s => text(ui, s))}
+      </ui.Box>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text dimColor>designed</ui.Text>
+        {item(ui, bar(12, u.designed / 100, C.yellow))}
+        <ui.Text>{pct(u.designed)}</ui.Text>
+      </ui.Box>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text dimColor>proven  </ui.Text>
+        {item(ui, bar(12, (u.proven ?? 0) / 100, C.yellow))}
+        <ui.Text>{pct(u.proven)}</ui.Text>
+      </ui.Box>
+      <ui.Text> </ui.Text>
+      {owed === 0 ? <ui.Text dimColor>Nothing owed: every criterion has a test{u.proven === 100 ? ' and a passing run' : ''}.</ui.Text> : null}
+      {group('design', 'To design')}
+      {group('cover', 'To run')}
+      {owed > listed ? <ui.Text dimColor>{`+${owed - listed} more: kane-cli cover gaps ${u.id}`}</ui.Text> : null}
+      {owed > 0 ? <ui.Button key="uc-close" label="Close these gaps with Claude" variant="primary" onPress={() => press(`uc-close:${u.id}`)} /> : null}
+    </ui.Box>
+  )
+}
+
+/** Finished runs the mod has seen in this project, newest first. */
+function historyView(ui: Kit, list: readonly HistoryEntry[], now: number, width: number) {
+  if (list.length === 0) return <ui.Text dimColor>No finished kane-cli run seen in this project yet. Each run is kept here when it ends.</ui.Text>
+  const c = { passed: list.filter(x => x.status === 'passed').length, failed: list.filter(x => x.status === 'failed').length }
+  return (
+    <ui.Box flexDirection="column">
+      <ui.Text dimColor>{`last ${list.length} run${list.length === 1 ? '' : 's'} here · ${c.passed} passed · ${c.failed} failed`}</ui.Text>
+      <ui.Text> </ui.Text>
+      {list.map((entry, i) => (
+        <ui.Box key={`history-${i}`} flexDirection="column">
+          <ui.Box flexDirection="row" gap={1}>
+            {glyph(ui, entry.status)}
+            <ui.Box flexShrink={1}>
+              <ui.Text bold={entry.status === 'failed'}>{cut(nm(entry), Math.max(16, width - 14))}</ui.Text>
+            </ui.Box>
+            <ui.Text dimColor>{ago(now - entry.at)}</ui.Text>
+          </ui.Box>
+          <ui.Box paddingLeft={2}>
+            <ui.Text dimColor>{cut([entry.kind, historyDetail(entry)].filter(Boolean).join(' · '), Math.max(20, width * 2 - 4))}</ui.Text>
+          </ui.Box>
+        </ui.Box>
+      ))}
+    </ui.Box>
+  )
+}
+
+function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: string) {
   if (a.state === 'unknown') return <ui.Text dimColor>Reading the requirement store…</ui.Text>
+  const opened = a.state === 'ready' && open ? a.useCases.find(u => u.id === open) : undefined
+  if (opened) return useCaseView(ui, press, opened)
   if (a.state === 'none') {
     return (
       <ui.Box flexDirection="column" borderStyle="round" borderColor={C.yellow} paddingX={1}>
@@ -340,7 +448,7 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number) {
       {a.useCases.map(u => (
         <ui.Box key={`uc-${u.id}`} flexDirection="column" borderStyle="round" borderColor={C.dim} paddingX={1}>
           <ui.Box flexDirection="row" gap={1}>
-            <ui.Text bold>{u.id}</ui.Text>
+            <ui.Button key={`uc-${u.id}`} label={u.id} plain onPress={() => press(`uc:${u.id}`)} />
             {debt(u).map(s => text(ui, s))}
           </ui.Box>
           <ui.Box flexDirection="row" gap={1}>
@@ -509,10 +617,13 @@ function startWatch(runs: Run[], p: Pointer, pointer: string): Run[] {
 /** A run reached its end: remember it, refresh assurance, and clear a change it covered. */
 async function finished($: EngineInterface, r: Run) {
   if (r.status !== 'passed' && r.status !== 'failed') return
-  const entry: HistoryEntry = { label: r.label, status: r.status, at: r.endedAt ?? r.startedAt, where: r.failure?.where }
+  const entry = historyEntry(r)
+  if (!entry) return
   await update($, lastAtom, () => entry)
   const all = await recent($)
-  all[projectDir] = [entry, ...(all[projectDir] ?? [])].slice(0, 10)
+  const list = [entry, ...(all[projectDir] ?? [])].slice(0, HISTORY_MAX)
+  all[projectDir] = list
+  await update($, historyAtom, () => list)
   await $.store.set(RECENT, all).catch(() => undefined)
   const change = await read($, changeAtom)
   if (change && r.startedAt > change.lastAt) {
@@ -554,8 +665,9 @@ async function readTheme($: EngineInterface) {
 }
 
 async function loadLast($: EngineInterface) {
-  const all = await recent($)
-  const last = all[projectDir]?.[0]
+  const list = (await recent($))[projectDir] ?? []
+  if (list.length) await update($, historyAtom, () => list)
+  const last = list[0]
   if (last) await update($, lastAtom, () => last)
 }
 
@@ -684,8 +796,14 @@ async function act($: EngineInterface, a: string) {
   const arg = at < 0 ? '' : a.slice(at + 1)
   if (k === 'open') await openPane($)
   else if (k === 'tab') {
-    await update($, viewAtom, v => ({ ...v, tab: arg === 'assure' ? ('assure' as const) : ('runs' as const), open: '' }))
+    await update($, viewAtom, v => ({ ...v, tab: arg === 'assure' ? ('assure' as const) : arg === 'history' ? ('history' as const) : ('runs' as const), open: '', uc: '' }))
     await openPane($)
+  } else if (k === 'uc') await update($, viewAtom, v => ({ ...v, tab: 'assure' as const, uc: arg }))
+  else if (k === 'uc-back') await update($, viewAtom, v => ({ ...v, uc: '' }))
+  else if (k === 'uc-close') {
+    const a = await read($, assuranceAtom)
+    const u = a.state === 'ready' ? a.useCases.find(x => x.id === arg) : undefined
+    if (u) void $.prompt.submit({ text: gapsPrompt(u) }).catch(() => undefined)
   } else if (k === 'run') await update($, viewAtom, v => ({ ...v, open: arg, tab: 'runs' as const }))
   else if (k === 'back') await update($, viewAtom, v => ({ ...v, open: '' }))
   else if (k === 'offer') await openOffer($)
@@ -748,7 +866,7 @@ export const register: Register = (on, options) => {
     projectDir = String((e as { cwd?: unknown }).cwd ?? '').replace(/\/$/, '')
     const home = await $.env.get('HOME').catch(() => undefined)
     if (home) activeDir = `${home}/.testmuai/kaneai/sessions/active`
-    await $.command.register({ name: 'kane', description: 'Kane: open the runs pane; /kane assurance; /kane auto | ask | off for changes', argumentHint: '[assurance | auto | ask | off]' })
+    await $.command.register({ name: 'kane', description: 'Kane: open the runs pane; /kane assurance; /kane history; /kane auto | ask | off for changes', argumentHint: '[assurance | history | auto | ask | off]' })
     $.clock.every(1000, () => void poll($).catch(() => undefined))
     $.clock.every(STEP_MS, () => paint($))
     $.clock.every(STEP_MS, () => void pulse($).catch(() => undefined))
@@ -776,12 +894,16 @@ export const register: Register = (on, options) => {
       await act($, 'tab:assure')
       return { text: 'Kane: assurance for this project.' }
     }
+    if (arg === 'history') {
+      await act($, 'tab:history')
+      return { text: 'Kane: finished runs in this project.' }
+    }
     if (arg === 'auto' || arg === 'ask' || arg === 'off') {
       const mode: AfterChange = arg === 'ask' ? 'offer' : arg
       await update($, modeAtom, () => mode)
       return { text: `Kane: after Claude changes code, ${mode === 'auto' ? 'Claude tests it before it finishes' : mode === 'offer' ? 'the band offers to test it' : 'nothing happens'} (this session).` }
     }
-    return { text: 'Kane: /kane opens the pane · /kane assurance · /kane auto | ask | off sets what happens after Claude changes code.' }
+    return { text: 'Kane: /kane opens the pane · /kane assurance · /kane history · /kane auto | ask | off sets what happens after Claude changes code.' }
   })
 
   // These three sit in the path of what the person and Claude do: the mod's own work is caught, the action always goes on.
@@ -839,7 +961,8 @@ export const register: Register = (on, options) => {
     const press: Press = a => void act($, a).catch(() => undefined)
     const opened = all.find(r => r.id === v.open) ?? runs.find(r => r.id === v.open)
     let body
-    if (v.tab === 'assure') body = assureView(ui, press, await read($, assuranceAtom), now)
+    if (v.tab === 'assure') body = assureView(ui, press, await read($, assuranceAtom), now, v.uc)
+    else if (v.tab === 'history') body = historyView(ui, await read($, historyAtom), now, width)
     else if (v.open === 'offer') body = offerView(ui, press, await read($, offerAtom), await read($, changeAtom), now)
     else if (opened?.kind === 'testrun' && opened.members) body = suiteView(ui, press, opened, now, width, true)
     else if (opened) body = runDetail(ui, press, opened, now, width)
@@ -856,6 +979,7 @@ export const register: Register = (on, options) => {
             <ui.Box flexDirection="row" gap={1}>
               <ui.Button key="tab-runs" label="Runs" variant={v.tab === 'runs' ? 'primary' : 'secondary'} onPress={() => press('tab:runs')} />
               <ui.Button key="tab-assure" label="Assurance" variant={v.tab === 'assure' ? 'primary' : 'secondary'} onPress={() => press('tab:assure')} />
+              <ui.Button key="tab-history" label="History" variant={v.tab === 'history' ? 'primary' : 'secondary'} onPress={() => press('tab:history')} />
             </ui.Box>
           </ui.Box>
         </ui.Box>

@@ -34,6 +34,10 @@ describe('the adapter: one wire line → internal events', () => {
     { name: 'testrun_member_end', line: L({ type: 'testrun_member_end', path: '/p/a_test.md', status: 'broken', duration_s: 5, failure: { message: 'boom' } }), want: [{ k: 'memberEnd', path: '/p/a_test.md', status: 'broken', durationS: 5, logPath: undefined, why: 'boom', at: AT }] },
     { name: 'testrun_done', line: L({ type: 'testrun_done', overall_status: 'cancelled' }), want: [{ k: 'suiteDone', status: 'cancelled', at: AT }] },
     { name: 'post_hoc lines are marked', line: L({ type: 'testrun_done', overall_status: 'passed', post_hoc: true }), want: [{ k: 'postHoc' }, { k: 'suiteDone', status: 'passed', at: AT }] },
+    { name: 'remote_start names the grid', line: L({ type: 'remote_start', backend: 'hyperexecute', env: 'prod', log_path: '/j/hyper.log' }), want: [{ k: 'remote', backend: 'hyperexecute', dispatched: false, at: AT }] },
+    { name: 'remote_dispatched gives the job and its link', line: L({ type: 'remote_dispatched', job_id: 'j-42', job_url: 'https://grid.example/jobs/j-42' }), want: [{ k: 'remote', jobId: 'j-42', jobUrl: 'https://grid.example/jobs/j-42', dispatched: true, at: AT }] },
+    { name: 'remote_error is the failure reason, its detail first', line: L({ type: 'remote_error', code: 'unknown_backend', detail: 'No such grid: foo' }), want: [{ k: 'error', message: 'No such grid: foo', at: AT }] },
+    { name: 'remote_error with no detail falls back to its code', line: L({ type: 'remote_error', code: 'internal_error' }), want: [{ k: 'error', message: 'internal_error', at: AT }] },
     { name: 'an unknown type is skipped', line: L({ type: 'brand_new_event', x: 1 }), want: [] },
     { name: 'a newer wire version is flagged, not parsed', line: JSON.stringify({ type: 'run_end', status: 'passed', v: 2, ts: '2026-10-08T10:00:00.000Z' }), want: [{ k: 'newer', at: AT }] },
   ]

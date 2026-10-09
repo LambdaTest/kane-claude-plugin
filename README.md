@@ -2,7 +2,7 @@
 
 **kane-qe** is a [Claude Code](https://claude.com/claude-code) plugin (a mod) that watches [kane-cli](https://github.com/LambdaTest/kane-cli) ([KaneAI](https://www.lambdatest.com/kane-ai)) and shows what it is doing, without being asked.
 
-Claude runs kane-cli; the mod reads what kane-cli leaves on disk and draws it: a band of three rows above the prompt with the kane mascot, and a pane for runs and assurance. When Claude changes code and nothing has tested it, the band says so and offers a test.
+Claude runs kane-cli; the mod reads what kane-cli leaves on disk and draws it: a band of three rows above the prompt with the kane mascot, and a pane for runs, assurance and history. When Claude changes code and nothing has tested it, the band says so and offers a test.
 
 ![The band while a test runs](guide/v2/band-running.png)
 
@@ -52,14 +52,16 @@ Nothing to start. Open Claude Code in a project and the band is there.
 1. **Ask Claude to test something**: "run `kane-cli run "Search for iPod and assert 4 products are listed" --url https://ecommerce-playground.lambdatest.io --agent --headless`", or "run the login test with kane-cli". Within two seconds the band shows the run, its time and the step it is on. A run started in a terminal in the same folder shows up the same way.
 2. **Open the pane** with `/kane` or `[ Open ]`. Press a run for its steps; the current or failing step opens to what the agent thinks, does and checks.
 3. **When a test fails**, the band names it and the step; the run's detail gives kane's own verdict (why, what kind, how sure, where) and *Open evidence*.
-4. **Several runs or a suite**: one coloured cell per run or test, with counts; a failure takes row 2 while the rest keep going.
+4. **Several runs or a suite**: one coloured cell per run or test, with counts; a failure takes row 2 while the rest keep going. A suite on the remote grid (`--remote`) shows how many tests are on the grid and since when; the pane gives the job and its link, and the tests are counted when the job ends.
 5. **After Claude changes code**, the band warns *⚠ 1 file changed, untested* with *Test this change*: saved tests that cover the change (with their last result), or an objective Claude drafts from the diff. `/kane auto` makes Claude test before it finishes; `/kane off` turns it off.
-6. **Assurance**: row 3 is requirement coverage from `kane-cli cover gaps --json`; the Assurance tab breaks it down per use case, or offers to set it up.
+6. **Assurance**: row 3 is requirement coverage from `kane-cli cover gaps --json`; the Assurance tab breaks it down per use case, or offers to set it up. Press a use case to see what it still owes and kane-cli's next command for each; *Close these gaps with Claude* hands it over.
+7. **History**: the History tab lists the last 30 finished runs in this project, with where each failed.
 
 | Command | |
 |---|---|
 | `/kane` | Open the pane |
 | `/kane assurance` | Open the Assurance tab |
+| `/kane history` | Open the History tab |
 | `/kane auto` · `/kane ask` · `/kane off` | What happens after Claude changes code, for this session |
 
 `/config` → kane-qe: **After Claude changes code** (`offer` by default, `auto`, `off`) and **kane-cli command** (default `kane-cli`, used only for the read-only `cover gaps`). Colours follow Claude Code's theme.
@@ -73,7 +75,7 @@ What it never does: it never starts a kane-cli run, never reads kane-cli's human
 ```
 claude plugin validate kane-qe --strict     # the plugin: manifest, hooks, state contract
 claude plugin validate . --strict           # the marketplace manifest
-claude plugin test kane-qe                  # 81 tests
+claude plugin test kane-qe                  # 103 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same on every push to `main` and on pull requests.
@@ -111,7 +113,7 @@ References: [install plugins](https://code.claude.com/docs/en/plugins/install), 
 | `kane-qe/hooks/sources.ts` | The live-run pointer and byte offsets into event files |
 | `kane-qe/hooks/register.tsx` | Polling, hooks (edits, end of turn, `/kane`, theme) and the drawing |
 | `kane-qe/hooks/mascot.ts` | The mascot: a cell grid in terminals, an image elsewhere |
-| `kane-qe/tests/` | Adapter table, band states at 60/80/120 columns, recorded kane-cli streams replayed, band and pane on terminal and desktop, change tracking, stale pointers, assurance, theme |
+| `kane-qe/tests/` | Adapter table, band states at 60/80/120 columns, recorded kane-cli streams replayed, band and pane on terminal and desktop, change tracking, stale pointers, assurance and use-case detail, remote suites, history, theme |
 | `.claude-plugin/marketplace.json` | The `lambdatest` marketplace: this repository installs with `/plugin marketplace add` |
 | `docs/` | The Field Guide and the explainer as standalone HTML, with the walkthrough video and screenshots (`guide/build_docs.sh` rebuilds them) |
 | `guide/` | The page sources, screenshots, design coverage, and the script that records the walkthrough (`KANE_DEMO_DIR=<project> guide/run_tour_v2.sh`) |

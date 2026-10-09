@@ -21,6 +21,7 @@ export type Ev =
   | { k: 'progress'; running: string[]; pending: number; done: number; total: number; at: number }
   | { k: 'memberEnd'; path: string; status: string; durationS?: number; logPath?: string; why?: string; at: number }
   | { k: 'suiteDone'; status: string; at: number }
+  | { k: 'remote'; backend?: string; jobId?: string; jobUrl?: string; dispatched: boolean; at: number }
   | { k: 'postHoc' }
 
 /** Label sources, weakest first: a stronger one replaces a weaker one. */
@@ -164,6 +165,14 @@ function one(o: Json, at: number): Ev[] {
     }
     case 'testrun_done':
       return [{ k: 'suiteDone', status: str(o.overall_status) ?? 'failed', at }]
+    case 'remote_start':
+      return [{ k: 'remote', backend: str(o.backend), dispatched: false, at }]
+    case 'remote_dispatched':
+      return [{ k: 'remote', jobId: str(o.job_id), jobUrl: str(o.job_url), dispatched: true, at }]
+    case 'remote_error': {
+      const m = str(o.detail) ?? str(o.code)
+      return m ? [{ k: 'error', message: m, at }] : []
+    }
     default:
       return []
   }

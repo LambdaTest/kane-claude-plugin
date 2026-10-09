@@ -226,6 +226,98 @@ describe('watching kane-cli', () => {
     await band.unmount()
   })
 
+  test('a suite sent to the remote grid says where it is until the job reports, then counts its tests', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    const sdir = `${S}/testrun-remote-j42`
+    const a = `${PROJECT}/.testmuai/tests/login_test.md`
+    const b = `${PROJECT}/.testmuai/tests/search_test.md`
+    startRun(
+      w,
+      50,
+      sdir,
+      'testrun',
+      line({ type: 'stream_start', surface: 'testrun', pid: 50 }) +
+        line({ type: 'testrun_plan', members: [{ path: a }, { path: b }], parallel: 2 }) +
+        line({ type: 'remote_start', backend: 'hyperexecute', env: 'prod', log_path: `${sdir}/hyper.log` }, 1) +
+        line({ type: 'remote_dispatched', job_id: 'j-42', job_url: 'https://grid.example/jobs/j-42' }, 3),
+    )
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect(await band.find({ type: 'Text', text: /2 tests on the grid/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /each test is reported when the job ends/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /tests done/ })).toBeUndefined()
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    expect(await pane.find({ type: 'Text', text: /hyperexecute · job j-42/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /https:\/\/grid\.example\/jobs\/j-42/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /The grid reports each test when the job ends/ })).toBeDefined()
+
+    // The job ends: the grid's results arrive after the fact, stamped with the grid's own time.
+    w.files[`${sdir}/events.ndjson`] +=
+      line({ type: 'testrun_member_start', path: a, post_hoc: true }, 10) +
+      line({ type: 'testrun_member_end', path: a, status: 'passed', duration_s: 20, post_hoc: true }, 30) +
+      line({ type: 'testrun_member_start', path: b, post_hoc: true }, 10) +
+      line({ type: 'testrun_member_end', path: b, status: 'failed', duration_s: 25, failure: { message: 'No results for the query' }, post_hoc: true }, 35) +
+      line({ type: 'testrun_done', overall_status: 'failed' }, 120) +
+      line({ type: 'remote_done', status: 'failed', exit: 1, job_id: 'j-42' }, 120)
+    endRun(w, 50)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    expect(await band.find({ type: 'Text', text: /✓ 1 passed/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /✗ 1 failed/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /The grid reports each test when the job ends/ })).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: /hyperexecute · job j-42/ })).toBeDefined()
+    await pane.unmount()
+    await band.unmount()
+  })
+
+  test('History lists the finished runs kept for this project, and a run that ends joins them', async ($, on) => {
+    const w = world(on, {
+      store: {
+        recentByProject: {
+          [PROJECT]: [
+            { label: 'checkout_guest_test.md', status: 'failed', at: T0 - 3_600_000, where: 'Fill the shipping address', kind: 'testmd', seconds: 66 },
+            { label: 'login_test.md', status: 'passed', at: T0 - 7_200_000 },
+          ],
+          '/work/other-project': [{ label: 'theirs_test.md', status: 'passed', at: T0 - 60_000 }],
+        },
+      },
+    })
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.settle()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const pane = await $.ui.mount({ ...PANE, surface } as never)
+      await pane.press({ key: 'tab-history' })
+      expect(await pane.find({ type: 'Text', text: /last 2 runs here · 1 passed · 1 failed/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /^checkout_guest$/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /testmd · failed on Fill the shipping address · 1m 06s/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /^login$/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /theirs/ })).toBeUndefined()
+      await pane.press({ key: 'tab-runs' })
+      await pane.unmount()
+    }
+    startRun(w, 61, `${S}/h1`, 'run', line({ type: 'stream_start', surface: 'run', pid: 61 }) + line({ step: 1, status: 'done', remark: 'Search for iPod' }, 4) + line({ type: 'run_end', status: 'passed', credits_consumed: 5 }, 9))
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    endRun(w, 61)
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    expect((await $.command.run({ command: 'kane', args: 'history' } as never) as { text?: string }).text).toContain('finished runs')
+    expect(await pane.find({ type: 'Text', text: /last 3 runs here · 2 passed · 1 failed/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^Search for iPod$/ })).toBeDefined()
+    await pane.unmount()
+  })
+
+  test('History with nothing kept says so', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.settle()
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    await pane.press({ key: 'tab-history' })
+    expect(await pane.find({ type: 'Text', text: /No finished kane-cli run seen in this project yet/ })).toBeDefined()
+    await pane.unmount()
+  })
+
   test('a stale pointer and another project’s run are not shown', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
@@ -376,10 +468,67 @@ describe('assurance', () => {
     expect(await band.find({ type: 'Text', text: /proven · 1 use case/ })).toBeDefined()
     const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
     await pane.press({ key: 'tab-assure' })
-    expect(await pane.find({ type: 'Text', text: /uc-buy-as-a-guest/ })).toBeDefined()
+    expect(await pane.find({ key: 'uc-uc-buy-as-a-guest' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /2 failing · 1 blocked · run 2h ago/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /1 stale/ })).toBeDefined()
     await pane.unmount()
     await band.unmount()
+  })
+
+  test('a use case opens to what it still owes; its gaps are handed to Claude, never run by the mod', async ($, on) => {
+    const w = world(on, {
+      cover: JSON.stringify({
+        design_completeness: { pct: 82 },
+        proven: { pct: 47 },
+        usecases: [
+          {
+            id: 'uc-buy-as-a-guest',
+            title: 'Buy as a guest',
+            risk: 'high',
+            design_completeness: { pct: 75 },
+            proven: { pct: 38 },
+            stale_acs: 0,
+            pending: [
+              { stage: 'design', title: 'Declined card shows a message', why: 'no test verifies this AC', risk: 'high', ready_command: 'kane-cli design tests --use-case uc-buy-as-a-guest' },
+              { stage: 'cover', title: 'Guest email is required', why: 'covered, never run', ready_command: 'kane-cli testrun run' },
+            ],
+          },
+          { id: 'uc-mobile-sign-in', design_completeness: { pct: 100 }, proven: { pct: 100 }, stale_acs: 0, pending: [] },
+        ],
+      }),
+    })
+    w.files[`${PROJECT}/.context/commits/1`] = 'x'
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.settle()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const pane = await $.ui.mount({ ...PANE, surface } as never)
+      await pane.press({ key: 'tab-assure' })
+      await pane.press({ key: 'uc-uc-buy-as-a-guest' })
+      expect(await pane.find({ type: 'Text', text: /^Buy as a guest$/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /^high risk$/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /^To design$/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /Declined card shows a message/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /no test verifies this AC/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /kane-cli design tests --use-case uc-buy-as-a-guest/ })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: /^To run$/ })).toBeDefined()
+      expect(await pane.find({ key: 'uc-uc-mobile-sign-in' })).toBeUndefined()
+      await pane.press({ key: 'uc-back' })
+      await pane.press({ key: 'uc-uc-mobile-sign-in' })
+      expect(await pane.find({ type: 'Text', text: /Nothing owed/ })).toBeDefined()
+      expect(await pane.find({ key: 'uc-close' })).toBeUndefined()
+      // Leaving the tab closes the use case.
+      await pane.press({ key: 'tab-runs' })
+      await pane.press({ key: 'tab-assure' })
+      expect(await pane.find({ key: 'uc-uc-buy-as-a-guest' })).toBeDefined()
+      await pane.unmount()
+    }
+    expect(w.prompts).toEqual([])
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    await pane.press({ key: 'uc-uc-buy-as-a-guest' })
+    await pane.press({ key: 'uc-close' })
+    expect(w.prompts.length).toBe(1)
+    expect(w.prompts[0]).toContain('kane-cli cover gaps uc-buy-as-a-guest')
+    expect(w.prompts[0]).toContain('kane-cli design tests --use-case uc-buy-as-a-guest')
+    await pane.unmount()
   })
 })

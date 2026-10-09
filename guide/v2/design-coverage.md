@@ -5,7 +5,7 @@ The design ([kane-cli mod: terminal build guide](https://claude.ai/artifact/5Dkz
 How each item was checked:
 - **live**: in a real Claude Code session in a terminal, with a real kane-cli run;
 - **staged**: a real Claude Code session, with kane-cli runs written to disk in kane-cli 0.8.20's own format, by `sleep` processes standing in for kane-cli;
-- **test**: `claude plugin test kane-qe` (81 tests).
+- **test**: `claude plugin test kane-qe` (103 tests).
 
 ## Features (design part 1, "What to build")
 
@@ -19,7 +19,7 @@ How each item was checked:
 | 6 | Suite progress | One cell per test, `5 of 12 tests done · 3 running · 4 left`, running tests on row 2 | live (3-test suite), staged (12), test |
 | 7 | Failures shown at once | The newest failure takes row 2 the moment it happens, in a suite too | live, staged |
 | 8 | Results when idle | `✓ 4 passed · ✗ 1 failed`, the failed test and its step; `last run ✓ login · 2h ago` from earlier sessions | live, test |
-| 9 | Details pane | `/kane` or `[ Open ]`: Runs and Assurance tabs | live |
+| 9 | Details pane | `/kane` or `[ Open ]`: Runs and Assurance tabs (a History tab was added later, see below) | live |
 | 10 | Step-by-step view | Steps with ticks and times; the current or failing step opens to think, act and checks | staged, test |
 | 11 | Failure explanation | why, kind (category · severity · confidence), where, the failing check, *Open evidence* | staged, live (kane's own verdict) |
 | 12 | Assurance coverage | Row 3 `47% proven · 4 use cases`; the tab's bars, failing/blocked, last run, use-case cards | live (real requirement store) |
@@ -45,7 +45,7 @@ Two differences, both deliberate:
 | Structured data only | Pointer JSON and `events.ndjson` lines; kane-cli's human output is never read |
 | No guesses on screen | What kane-cli does not report is left out (step totals, credits while running, balance, browser) |
 | Ignore what you do not know | `adapter.ts` dispatches on known types and skips the rest |
-| Every behaviour has a test; README changes with it | 79 tests; both READMEs describe v2 |
+| Every behaviour has a test; README changes with it | 103 tests; both READMEs describe v2 |
 | Code shape: sources → adapter → model → views | `sources.ts`, `adapter.ts` (only place raw field names appear), `model.ts` (pure), `register.tsx` |
 | Faults 1–5 in the prototype | All fixed: wrapped text keeps its column, waiting markers in the dim colour, card borders in the dim colour, cuts sized from the pane width, no background on band or pane |
 
@@ -64,7 +64,19 @@ Two differences, both deliberate:
 | A light terminal theme, a narrow terminal | A darker palette on light themes; every band row fits its width | test, live (80 columns) |
 | kane-cli is upgraded | The display keeps working; a newer wire format says so instead of breaking | test |
 
+## Added after the design
+
+Three things the design did not ask for, each checked by **test** only (not yet in a live session):
+
+| Addition | What it does |
+|---|---|
+| Remote suites | `kane-cli testrun run --remote`: the grid reports its tests only when the job ends, so until then the band reads `12 tests on the grid · sent 2m ago` and the pane gives the grid, the job and its link. A job that fails before any test reports gives every test that reason |
+| Use-case detail | Press a use case on the Assurance tab: its title and risk, what it owes to design and to run, kane-cli's reason and next command for each, and *Close these gaps with Claude* |
+| History tab | The last 30 finished runs in this project (it was 10, shown only as `last run …`), with when, how long, and where each failed or a suite's counts. `/kane history` opens it |
+
 ## Not checked
+
+- **The three additions above in a live session.** The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
 
 - **The desktop app.** The band and pane are mounted on the desktop surface in tests (the mascot as an image there), but not opened in the app itself.
 - **The light palette in a live session**: switching a session's theme changes the person's global setting, so it is covered by a test only.

@@ -7,6 +7,10 @@ import {
   featureWords,
   fold,
   foldMember,
+  gapsPrompt,
+  historyDetail,
+  historyEntry,
+  onGrid,
   labelFromCommand,
   newRun,
   objectiveFrom,
@@ -18,11 +22,11 @@ import {
   isTrackedEdit,
 } from '../hooks/model'
 import type { BandOptions } from '../hooks/model'
-import type { Assurance, Kind, Run } from '../types'
+import type { Assurance, HistoryEntry, Kind, Run } from '../types'
 import { runFailed, runPassed, testmdPassed, testrunFailed, testrunPassed, testrunPassedMember } from './fixtures/fixtures'
 
 const T0 = Date.parse('2026-10-08T10:00:00.000Z')
-const READY: Assurance = { state: 'ready', designedPct: 82, provenPct: 47, useCases: [1, 2, 3, 4].map(i => ({ id: `uc-${i}`, designed: 80, proven: 40, stale: 0, toDesign: 0, toCover: 1 })) }
+const READY: Assurance = { state: 'ready', designedPct: 82, provenPct: 47, useCases: [1, 2, 3, 4].map(i => ({ id: `uc-${i}`, designed: 80, proven: 40, stale: 0, toDesign: 0, toCover: 1, pending: [] })) }
 const opts = (o: Partial<BandOptions> = {}): BandOptions => ({ assurance: READY, now: T0 + 30_000, columns: 80, ...o })
 const rows = (runs: Run[], o: Partial<BandOptions> = {}) => band(runs, opts(o)).rows.map(rowText)
 
@@ -165,6 +169,84 @@ describe('the band, state by state, at 60, 80 and 120 columns', () => {
   })
 })
 
+describe('a suite on the remote grid', () => {
+  const remote = (evs: Ev[]): Run => evs.reduce(fold, suite(['pending', 'pending', 'pending']))
+  const start: Ev = { k: 'remote', backend: 'hyperexecute', dispatched: false, at: T0 }
+  const sent: Ev = { k: 'remote', jobId: 'j-42', jobUrl: 'https://grid.example/jobs/j-42', dispatched: true, at: T0 + 5_000 }
+
+  for (const columns of [60, 80, 120]) {
+    test(`before the job reports, the band says where the tests are (${columns})`, () => {
+      const sending = rows([remote([start])], { columns })
+      expect(sending[0]).toContain(' suite  □□□ 3 tests on the grid')
+      const r = rows([remote([start, sent])], { columns })
+      expect(r[0]).toContain(' suite  □□□ 3 tests on the grid')
+      if (columns >= 80) {
+        expect(sending[0]).toContain('· sending the job')
+        expect(r[0]).toContain('· sent 25s ago [Open]')
+        expect(r[1]).toBe('grid hyperexecute · each test is reported when the job ends')
+      }
+      for (const row of band([remote([start, sent])], opts({ columns })).rows) expect(rowWidth(row) <= columns).toBe(true)
+    })
+  }
+
+  test('it keeps the job and its link, and the mascot keeps thinking', () => {
+    const s = remote([start, sent])
+    expect(s.remote).toEqual({ backend: 'hyperexecute', jobId: 'j-42', jobUrl: 'https://grid.example/jobs/j-42', dispatchedAt: T0 + 5_000 })
+    expect(onGrid(s)).toBe(true)
+    expect(band([s], opts()).think).toBe(true)
+  })
+
+  test('once the grid reports its tests, the band counts them as any suite', () => {
+    const paths = (remote([]).members ?? []).map(m => m.id)
+    const s = remote([start, sent, { k: 'postHoc' }, { k: 'memberStart', path: paths[0]!, at: T0 + 1000 }, { k: 'memberEnd', path: paths[0]!, status: 'passed', at: T0 + 9000 }])
+    expect(onGrid(s)).toBe(false)
+    expect(rows([s])[0]).toContain('1 of 3 tests done')
+  })
+
+  test('a job that fails before any test reports gives every test the job’s reason', () => {
+    const s = remote([start, { k: 'error', message: 'No such grid: foo', at: T0 + 1000 }, { k: 'suiteDone', status: 'failed', at: T0 + 2000 }])
+    expect((s.members ?? []).map(m => m.status)).toEqual(['failed', 'failed', 'failed'])
+    expect(s.members?.[0]?.failure?.why).toBe('No such grid: foo')
+    expect(rows([s], { now: T0 + 3000 })[0]).toContain('✗ 3 failed')
+  })
+
+  test('a local suite that ends early leaves its unstarted tests waiting', () => {
+    const s = fold(suite(['passed', 'pending']), { k: 'suiteDone', status: 'failed', at: T0 + 2000 })
+    expect((s.members ?? []).map(m => m.status)).toEqual(['passed', 'pending'])
+  })
+})
+
+describe('history', () => {
+  const cases: { name: string; run: Run; want: HistoryEntry | undefined; detail?: string }[] = [
+    { name: 'a run still going is not kept', run: run('a', 'run', [label('Search'), step(1, 'running', 'Open the page')]), want: undefined },
+    { name: 'a passed run', run: run('b', 'run', [label('Search'), step(1, 'done', 'Open the page', 3), passed(41)]), want: { label: 'Search', status: 'passed', at: T0 + 41_000, kind: 'run', seconds: 41 }, detail: 'passed · 41s' },
+    {
+      name: 'a failed run keeps where it failed',
+      run: run('c', 'run', [label('Checkout'), step(1, 'failed', 'Fill the shipping address', 30), failedEnd(66)]),
+      want: { label: 'Checkout', status: 'failed', at: T0 + 66_000, kind: 'run', seconds: 66, where: 'Fill the shipping address' },
+      detail: 'failed on Fill the shipping address · 1m 06s',
+    },
+    {
+      name: 'a suite keeps its counts',
+      run: fold(suite(['passed', 'passed', 'failed']), { k: 'suiteDone', status: 'failed', at: T0 + 90_000 }),
+      want: { label: 'suite · --tags smoke', status: 'failed', at: T0 + 90_000, kind: 'testrun', seconds: 90, tests: { passed: 2, failed: 1 } },
+      detail: '2 passed · 1 failed · 1m 30s',
+    },
+  ]
+  for (const c of cases) {
+    test(c.name, () => {
+      const e = historyEntry(c.run)
+      expect(e).toEqual(c.want)
+      if (e && c.detail) expect(historyDetail(e)).toBe(c.detail)
+    })
+  }
+
+  test('an entry kept by an earlier version still reads', () => {
+    expect(historyDetail({ label: 'login_test.md', status: 'passed', at: T0 })).toBe('passed')
+    expect(historyDetail({ label: 'x', status: 'failed', at: T0 })).toBe('failed')
+  })
+})
+
 describe('recorded streams replayed', () => {
   test('surface run, failed: kane’s own root cause, where, and credits', () => {
     const r = replay(runFailed, 'run')
@@ -265,7 +347,23 @@ describe('assurance from cover gaps', () => {
         stage: 'all',
         design_completeness: { pct: 82, acs_designed: '13/16' },
         proven: { pct: 47, failing: 2, blocked: 1, not_run: 6, latest_run: { started_at: '2026-10-08T08:00:00Z' } },
-        usecases: [{ id: 'uc-buy-as-a-guest', design_completeness: { pct: 75 }, proven: { pct: 38 }, stale_acs: 1, pending: [{ stage: 'design' }, { stage: 'cover' }, { stage: 'cover' }] }, { id: null, title: 'Saved addresses', design_completeness: { pct: 100 }, stale_acs: 0, pending: [] }],
+        usecases: [
+          {
+            id: 'uc-buy-as-a-guest',
+            title: 'Buy as a guest',
+            risk: 'high',
+            design_completeness: { pct: 75 },
+            proven: { pct: 38 },
+            stale_acs: 1,
+            pending: [
+              { stage: 'design', ref: 'ac-payment-declined', title: 'Declined card shows a message', why: 'no test verifies this AC', risk: 'high', kind: 'no-verifies', tag: 'create', ready_command: 'kane-cli design tests --use-case uc-buy-as-a-guest' },
+              { stage: 'cover', ref: 'ac-guest-email', kind: 'covered-not-run', ready_command: 'kane-cli testrun run' },
+              { stage: 'cover' },
+              { stage: 'other', title: 'not a stage the mod knows' },
+            ],
+          },
+          { id: null, title: 'Saved addresses', design_completeness: { pct: 100 }, stale_acs: 0, pending: [] },
+        ],
       })}`,
     )
     expect(a).toEqual({
@@ -276,10 +374,44 @@ describe('assurance from cover gaps', () => {
       blocked: 1,
       lastRunAt: Date.parse('2026-10-08T08:00:00Z'),
       useCases: [
-        { id: 'uc-buy-as-a-guest', designed: 75, proven: 38, stale: 1, toDesign: 1, toCover: 2 },
-        { id: 'Saved addresses', designed: 100, proven: undefined, stale: 0, toDesign: 0, toCover: 0 },
+        {
+          id: 'uc-buy-as-a-guest',
+          title: 'Buy as a guest',
+          risk: 'high',
+          designed: 75,
+          proven: 38,
+          stale: 1,
+          toDesign: 1,
+          toCover: 2,
+          pending: [
+            { title: 'Declined card shows a message', why: 'no test verifies this AC', risk: 'high', stage: 'design', command: 'kane-cli design tests --use-case uc-buy-as-a-guest' },
+            { title: 'ac-guest-email', why: undefined, risk: undefined, stage: 'cover', command: 'kane-cli testrun run' },
+            { title: 'gap', why: undefined, risk: undefined, stage: 'cover', command: undefined },
+          ],
+        },
+        { id: 'Saved addresses', title: undefined, risk: undefined, designed: 100, proven: undefined, stale: 0, toDesign: 0, toCover: 0, pending: [] },
       ],
     })
+  })
+
+  test('a use case lists at most 20 things it owes; its counts still cover them all', () => {
+    const pending = Array.from({ length: 25 }, (_, i) => ({ stage: 'cover', title: `ac-${i}` }))
+    const a = parseCoverGaps(JSON.stringify({ design_completeness: { pct: 50 }, usecases: [{ id: 'uc-big', design_completeness: { pct: 50 }, pending }] }))
+    const u = a.state === 'ready' ? a.useCases[0]! : undefined
+    expect(u?.pending.length).toBe(20)
+    expect(u?.toCover).toBe(25)
+  })
+
+  test('closing a use case’s gaps hands Claude its first next command', () => {
+    const cases = [
+      { name: 'with a command', pending: [{ title: 'Declined card', stage: 'design' as const, command: 'kane-cli design tests --use-case uc-a' }], has: ['kane-cli cover gaps uc-a', 'Start with `kane-cli design tests --use-case uc-a` (Declined card)'], lacks: [] as string[] },
+      { name: 'with none', pending: [{ title: 'x', stage: 'cover' as const }], has: ['kane-cli cover gaps uc-a'], lacks: ['Start with'] },
+    ]
+    for (const c of cases) {
+      const p = gapsPrompt({ id: 'uc-a', designed: 50, stale: 0, toDesign: 1, toCover: 0, pending: c.pending })
+      for (const h of c.has) expect(p).toContain(h)
+      for (const l of c.lacks) expect(p).not.toContain(l)
+    }
   })
 
   test('nothing run yet has no proven', () => {

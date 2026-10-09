@@ -3,7 +3,7 @@
 
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import type { Assurance, Check, HistoryEntry, Kind, Run, Status, Step, UseCase } from '../types'
+import type { Assurance, Check, HistoryEntry, Kind, Pending, Run, Status, Step, UseCase } from '../types'
 
 /** The design's palette, made for dark terminals. */
 const DARK = {
@@ -197,8 +197,22 @@ export function fold(run: Run, ev: Ev): Run {
       })
     case 'suiteDone': {
       const status: Status = ev.status === 'passed' ? 'passed' : 'failed'
-      const members = (run.members ?? []).map(m => (m.status === 'running' ? { ...m, status: 'failed' as const, endedAt: ev.at, failure: { why: 'the suite ended before this test finished' } } : m))
+      // A grid job that failed before any test reported: every test shares the job's reason.
+      const lost = status === 'failed' && !!run.remote && !(run.members ?? []).some(m => m.status === 'passed' || m.status === 'failed')
+      const members = (run.members ?? []).map(m => {
+        if (m.status === 'running') return { ...m, status: 'failed' as const, endedAt: ev.at, failure: { why: 'the suite ended before this test finished' } }
+        if (lost && m.status === 'pending') return { ...m, status: 'failed' as const, startedAt: ev.at, endedAt: ev.at, failure: { why: run.failure?.why || 'the grid job ended with no result for this test' } }
+        return m
+      })
       return { ...run, status, endedAt: ev.at, members }
+    }
+    case 'remote': {
+      const remote = { ...run.remote }
+      if (ev.backend) remote.backend = ev.backend
+      if (ev.jobId) remote.jobId = ev.jobId
+      if (ev.jobUrl) remote.jobUrl = ev.jobUrl
+      if (ev.dispatched) remote.dispatchedAt = ev.at
+      return { ...run, kind: 'testrun', remote }
     }
   }
 }
@@ -262,6 +276,15 @@ export function nowText(r: Run): string {
   if (done) return `✓ ${done.text} · next step…`
   return 'starting the browser'
 }
+
+/** True while a suite's tests are on the remote grid and none has reported: the grid reports them when the job ends. */
+export function onGrid(r: Run): boolean {
+  if (!r.remote || !isLive(r.status)) return false
+  return !(r.members ?? []).some(m => m.status !== 'pending')
+}
+
+/** "sent 2m 05s ago", or that the job is still being sent. */
+export const gridSince = (r: Run, now: number): string => (r.remote?.dispatchedAt ? `sent ${fmt((now - r.remote.dispatchedAt) / 1000)} ago` : 'sending the job')
 
 // ── the band ────────────────────────────────────────────────────────────
 
@@ -401,6 +424,17 @@ function pickBand(runs: readonly Run[], o: BandOptions): Band {
     const running = only.members.filter(m => m.status === 'running')
     const failed = newestFailed(only.members)
     const counts = c.total > 0 ? [{ t: `${c.passed + c.failed} of ${c.total} tests done`, b: true }, dim(`· ${c.running} running · ${c.pending} left`)] : [dim('planning')]
+    if (onGrid(only)) {
+      const tests = c.total > 0 ? [{ t: `${c.total} test${c.total === 1 ? '' : 's'} on the grid`, b: true }, dim(`· ${gridSince(only, o.now)}`)] : [dim(gridSince(only, o.now))]
+      return {
+        think,
+        rows: [
+          { items: [chip('suite', true), cells(only.members.map(m => m.status)), ...tests], button: open },
+          { items: [dim('grid'), { t: only.remote?.backend ?? 'remote' }, dim('· each test is reported when the job ends')] },
+          assuranceRow(o.assurance),
+        ],
+      }
+    }
     return {
       think,
       rows: [
@@ -487,6 +521,9 @@ export function kindLine(r: Run): string | undefined {
 
 // ── assurance ────────────────────────────────────────────────────────────
 
+/** The most a use case's detail lists; its counts still cover every row. */
+const MAX_PENDING = 20
+
 /** `kane-cli cover gaps --json` → what the band and the pane show. */
 export function parseCoverGaps(text: string): Assurance {
   const start = text.indexOf('{')
@@ -502,13 +539,21 @@ export function parseCoverGaps(text: string): Assurance {
   const started = Date.parse(String(proven?.latest_run?.started_at ?? ''))
   const useCases: UseCase[] = (Array.isArray(o.usecases) ? o.usecases : []).map((u: Record<string, any>) => {
     const pending: Record<string, any>[] = Array.isArray(u.pending) ? u.pending : []
+    const text = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined)
+    const owed: Pending[] = pending
+      .filter(p => p && (p.stage === 'design' || p.stage === 'cover'))
+      .slice(0, MAX_PENDING)
+      .map(p => ({ title: text(p.title) ?? text(p.id) ?? text(p.ref) ?? text(p.kind) ?? 'gap', why: text(p.why), risk: text(p.risk), stage: p.stage, command: text(p.ready_command) }))
     return {
       id: String(u.id ?? u.title ?? 'use case'),
+      title: text(u.id) ? text(u.title) : undefined,
+      risk: text(u.risk),
       designed: pct(u.design_completeness?.pct) ?? 0,
       proven: pct(u.proven?.pct),
       stale: typeof u.stale_acs === 'number' ? u.stale_acs : 0,
       toDesign: pending.filter(p => p.stage === 'design').length,
       toCover: pending.filter(p => p.stage === 'cover').length,
+      pending: owed,
     }
   })
   return {
@@ -530,6 +575,39 @@ export function debt(u: UseCase): Span[] {
   if (u.toCover) out.push({ t: `${u.toCover} to run`, c: C.dim })
   if (!out.length && u.proven === 100) out.push({ t: 'proven', c: C.mint })
   return out
+}
+
+/** What Claude is asked when the person wants a use case's gaps closed. */
+export function gapsPrompt(u: UseCase): string {
+  const first = u.pending.find(p => p.command)
+  const start = first?.command ? ` Start with \`${first.command}\` (${first.title}).` : ''
+  return `Close the assurance gaps of kane-cli use case ${u.id}: \`kane-cli cover gaps ${u.id}\` lists what it still owes.${start} Use --mode agent on kane-cli's design and maintain commands, and tell me what changed.`
+}
+
+// ── history ──────────────────────────────────────────────────────────────
+
+/** How many finished runs the mod keeps per project. */
+export const HISTORY_MAX = 30
+
+/** What the mod remembers of a finished run. */
+export function historyEntry(r: Run): HistoryEntry | undefined {
+  if (r.status !== 'passed' && r.status !== 'failed') return undefined
+  const at = r.endedAt ?? r.startedAt
+  const e: HistoryEntry = { label: r.label, status: r.status, at, kind: r.kind, seconds: Math.max(0, Math.round((at - r.startedAt) / 1000)) }
+  if (r.failure?.where) e.where = r.failure.where
+  if (r.kind === 'testrun' && r.members) {
+    const c = tally(r.members)
+    e.tests = { passed: c.passed, failed: c.failed }
+  }
+  return e
+}
+
+/** A history row's second line: a suite's counts, where a run failed, or that it passed. */
+export function historyDetail(h: HistoryEntry): string {
+  const took = h.seconds ? ` · ${fmt(h.seconds)}` : ''
+  if (h.tests) return `${h.tests.passed} passed · ${h.tests.failed} failed${took}`
+  if (h.status === 'failed') return `${h.where ? `failed on ${h.where}` : 'failed'}${took}`
+  return `passed${took}`
 }
 
 // ── what Claude ran ──────────────────────────────────────────────────────
