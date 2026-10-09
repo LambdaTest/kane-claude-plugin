@@ -66,7 +66,7 @@ Two differences, both deliberate:
 
 ## Added after the design
 
-Four things the design did not ask for, each checked by **test** only (not yet in a live session, except that a trial card with fake data was drawn and clicked in a fullscreen terminal):
+Things the design did not ask for. Use-case detail, the card, the spinner and History were checked **live**: a real Claude Code session in a fullscreen terminal, a demo shop project with a real requirement store, and real kane-cli runs (`guide/run_tour_v3.sh` records it). Remote suites are checked by **test** only.
 
 | Addition | What it does |
 |---|---|
@@ -74,10 +74,14 @@ Four things the design did not ask for, each checked by **test** only (not yet i
 | Use-case detail | Press a use case on the Assurance tab: its title and risk, what it owes to design and to run, kane-cli's reason and next command for each, and *Close these gaps with Claude* |
 | Card in the chat | A kane-cli test Claude runs is drawn in the conversation as a card in place of its shell row: one line while it runs, then the result, a failure's on/why/kind or a suite's counts, *View steps* and *View evidence*. *View evidence* opens the pack in kane-cli's viewer in one click, which is the one time the mod starts a kane-cli command other than `cover gaps`. Printed chats (terminal outside fullscreen) get the evidence path instead of buttons |
 | History tab | The last 30 finished runs in this project (it was 10, shown only as `last run …`), with when, how long, and where each failed or a suite's counts. `/kane history` opens it |
+| Spinner | A one-cell spinner leads the running step on the band and on the card's running line, stepping with the mascot |
+| Found live, and fixed | Saved tests that match a change equally are ordered by last result; a run started outside the chat is named from its process; the idle band counts each test by its latest result; use-case cards show their title; a reason shared by every row is said once |
 
 ## Not checked
 
-- **The four additions above in a live session.** The card's evidence button has never opened a real pack. The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
+- **Remote suites in a live session.** The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
+- **View evidence opening the browser.** Live, the button started `kane-cli evidence serve` for the run's real pack and reported the evidence opened; the browser tab itself was not observed by the recording.
+- **The card outside a fullscreen terminal**: its evidence-path form is covered by a test only.
 
 - **The desktop app.** The band and pane are mounted on the desktop surface in tests (the mascot as an image there), but not opened in the app itself.
 - **The light palette in a live session**: switching a session's theme changes the person's global setting, so it is covered by a test only.
