@@ -117,7 +117,7 @@ References: [install plugins](https://code.claude.com/docs/en/plugins/install), 
 | `kane-qe/tests/` | Adapter table, band states at 60/80/120 columns, recorded kane-cli streams replayed, band and pane on terminal and desktop, change tracking, stale pointers, assurance and use-case detail, remote suites, history, the card in the chat, theme |
 | `.claude-plugin/marketplace.json` | The `lambdatest` marketplace: this repository installs with `/plugin marketplace add` |
 | `docs/` | The Field Guide and the explainer as standalone HTML, with the walkthrough video and screenshots (`guide/build_docs.sh` rebuilds them) |
-| `guide/` | The page sources, screenshots, design coverage, and the script that records the walkthrough (`KANE_DEMO_DIR=<project> guide/run_tour_v2.sh`) |
+| `guide/` | The page sources, screenshots, design coverage, and the scripts that record a walkthrough with real runs (`KANE_DEMO_DIR=<project> guide/run_tour_v2.sh`; `run_tour_v3.sh` for a demo shop project, covering the chat card, auto mode, use-case detail and History) and cut a short captioned promo from one (`python3 guide/make_promo.py guide/promo.json`) |
 
 Edit `kane-qe/` and a session that loads it with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS` reloads it on save. After recording a new kane-cli stream into `kane-qe/tests/fixtures/`, run `node kane-qe/tests/fixtures/build.mjs`.
 

@@ -14,3 +14,8 @@ guide/*.png
 guide/probe.*
 guide/tour-v2-raw.mp4
 guide/tour-v2.json
+guide/take*.mp4
+guide/tour-v3-raw.mp4
+guide/*.log
+guide/tour-v3.json
+guide/chapters-take*.json

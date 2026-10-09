@@ -1,0 +1,304 @@
+{
+ "source": "take3.mp4",
+ "output": "kane-qe-promo.mp4",
+ "title": [
+  "kane-qe",
+  "See every kane-cli test, right inside Claude Code"
+ ],
+ "title_seconds": 2.8,
+ "end": [
+  "kane-qe",
+  "A Claude Code plugin for kane-cli",
+  "$ /plugin marketplace add LambdaTest/kane-claude-plugin",
+  "$ /plugin install kane-qe@lambdatest"
+ ],
+ "end_seconds": 4.5,
+ "segments": [
+  {
+   "from": 1.0,
+   "to": 4.5,
+   "caption": "Always above the prompt",
+   "sub": "What kane-cli is doing, your last run, and how much of your requirements is proven.",
+   "crop": [
+    0,
+    630,
+    800,
+    450
+   ]
+  },
+  {
+   "from": 27.5,
+   "to": 32.5,
+   "caption": "Ask Claude to test",
+   "sub": "The run shows up in the chat as it happens: the test, its time, the step it is on.",
+   "crop": [
+    0,
+    150,
+    960,
+    540
+   ]
+  },
+  {
+   "from": 33,
+   "to": 39,
+   "caption": "Watch it live",
+   "sub": "The band follows the same step, and the mascot's eyes move while kane-cli works.",
+   "crop": [
+    0,
+    630,
+    800,
+    450
+   ]
+  },
+  {
+   "from": 49,
+   "to": 55,
+   "caption": "Every run leaves a card",
+   "sub": "Pass or fail, kane-cli's own reason for a failure, and how sure it is.",
+   "crop": [
+    0,
+    170,
+    1120,
+    630
+   ]
+  },
+  {
+   "from": 61,
+   "to": 68.5,
+   "caption": "One click to the steps",
+   "sub": "What the agent thought, did and checked, with kane-cli's verdict on top.",
+   "mask": [
+    [
+     0,
+     110,
+     640,
+     34
+    ]
+   ]
+  },
+  {
+   "from": 69.5,
+   "to": 74,
+   "caption": "One click to the evidence",
+   "sub": "View evidence opens that run's evidence pack in your browser.",
+   "mask": [
+    [
+     0,
+     110,
+     640,
+     34
+    ]
+   ]
+  },
+  {
+   "from": 91,
+   "to": 97,
+   "caption": "Claude changes your code",
+   "sub": "The band notices at once: 1 file changed, untested.",
+   "crop": [
+    0,
+    480,
+    1066,
+    600
+   ]
+  },
+  {
+   "from": 100,
+   "to": 106,
+   "caption": "Test this change",
+   "sub": "It offers the saved tests that cover the change, with their last result.",
+   "crop": [
+    960,
+    0,
+    960,
+    540
+   ],
+   "mask": [
+    [
+     960,
+     0,
+     294,
+     1080
+    ]
+   ]
+  },
+  {
+   "from": 139,
+   "to": 144.5,
+   "caption": "Proven",
+   "sub": "The saved test runs, the card is green, and the warning clears.",
+   "crop": [
+    0,
+    480,
+    1066,
+    600
+   ]
+  },
+  {
+   "from": 173.6,
+   "to": 176.6,
+   "caption": "Or let Claude test by itself",
+   "sub": "In auto mode Claude is held at the end of its turn until the change is tested.",
+   "crop": [
+    0,
+    540,
+    960,
+    540
+   ],
+   "mask": [
+    [
+     0,
+     0,
+     1250,
+     880
+    ]
+   ]
+  },
+  {
+   "from": 179,
+   "to": 185,
+   "caption": "Claude runs the test",
+   "sub": "No button, no prompt: it picks the saved test and runs it.",
+   "crop": [
+    0,
+    600,
+    853,
+    480
+   ],
+   "mask": [
+    [
+     0,
+     0,
+     1250,
+     812
+    ]
+   ]
+  },
+  {
+   "from": 187.6,
+   "to": 190.8,
+   "caption": "And reports back",
+   "sub": "Another green card in the conversation.",
+   "crop": [
+    0,
+    520,
+    996,
+    560
+   ],
+   "mask": [
+    [
+     0,
+     0,
+     1250,
+     730
+    ]
+   ]
+  },
+  {
+   "from": 214,
+   "to": 220,
+   "caption": "Whole suites at a glance",
+   "sub": "One cell per test, how many are done, and what is running now.",
+   "crop": [
+    0,
+    440,
+    1137,
+    640
+   ]
+  },
+  {
+   "from": 226,
+   "to": 232,
+   "caption": "One card for the suite",
+   "sub": "Its counts, a cell per test, and the suite's evidence.",
+   "crop": [
+    0,
+    330,
+    1280,
+    720
+   ],
+   "mask": [
+    [
+     0,
+     0,
+     1250,
+     350
+    ]
+   ]
+  },
+  {
+   "from": 247,
+   "to": 255,
+   "caption": "Runs started anywhere",
+   "sub": "Tests started in another terminal show up too, by name, with no setup.",
+   "mask": [
+    [
+     0,
+     0,
+     1250,
+     322
+    ]
+   ]
+  },
+  {
+   "from": 282,
+   "to": 287,
+   "caption": "Requirement coverage",
+   "sub": "How much is designed, how much is proven, and what each use case still owes.",
+   "crop": [
+    960,
+    0,
+    960,
+    540
+   ],
+   "mask": [
+    [
+     960,
+     0,
+     294,
+     1080
+    ]
+   ]
+  },
+  {
+   "from": 289,
+   "to": 297,
+   "caption": "Open a use case",
+   "sub": "Every gap, kane-cli's next command for it, and one button to hand it to Claude.",
+   "crop": [
+    960,
+    0,
+    960,
+    540
+   ],
+   "mask": [
+    [
+     960,
+     0,
+     294,
+     1080
+    ]
+   ]
+  },
+  {
+   "from": 302,
+   "to": 309,
+   "caption": "History",
+   "sub": "Every finished run in this project: when, how long, and where it failed.",
+   "crop": [
+    960,
+    0,
+    960,
+    540
+   ],
+   "mask": [
+    [
+     960,
+     0,
+     294,
+     1080
+    ]
+   ]
+  }
+ ]
+}
