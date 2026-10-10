@@ -42,9 +42,22 @@ export type Run = {
   skipped?: number
   /** Where the label came from; a better source replaces a weaker one. */
   labelRank?: number
+  /** A suite sent to the remote grid: the grid reports its tests only when the job ends. */
+  remote?: Remote
+  /** The chat row of the shell call that started it, when Claude ran it: where its card is drawn. */
+  toolUseId?: string
+  /** A suite's execution id, which names its evidence pack. */
+  executionId?: string
+  /** Its sealed evidence pack on disk, once kane-cli has written it. */
+  evidence?: string
 }
 
-export type UseCase = { id: string; designed: number; proven?: number; stale: number; toDesign: number; toCover: number }
+export type Remote = { backend?: string; jobId?: string; jobUrl?: string; dispatchedAt?: number }
+
+/** One thing a use case still owes, as `cover gaps` lists it. */
+export type Pending = { title: string; why?: string; risk?: string; stage: 'design' | 'cover'; command?: string }
+
+export type UseCase = { id: string; title?: string; risk?: string; designed: number; proven?: number; stale: number; toDesign: number; toCover: number; pending: Pending[] }
 
 export type Assurance =
   | { state: 'unknown' }
@@ -69,12 +82,15 @@ export type Change = { files: string[]; firstAt: number; lastAt: number; shown: 
 export type Offer = { files: string[]; objective?: string; drafting: boolean; note?: string; saved: string[]; url?: string; last?: Record<string, HistoryEntry> }
 
 export type View = {
-  tab: 'runs' | 'assure'
+  tab: 'runs' | 'assure' | 'history'
   /** The run shown in detail, `offer` for the offer card, or empty for the list. */
   open: string
+  /** The use case shown in detail on the Assurance tab, or empty for the list. */
+  uc?: string
 }
 
-export type HistoryEntry = { label: string; status: 'passed' | 'failed'; at: number; where?: string }
+/** One finished run, as the mod keeps it per project. `tests` is set for a suite. */
+export type HistoryEntry = { label: string; status: 'passed' | 'failed'; at: number; where?: string; kind?: Kind; seconds?: number; tests?: { passed: number; failed: number } }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -88,6 +104,7 @@ declare module 'claude-code' {
       /** `/kane auto|ask|off` for this session; empty uses the setting. */
       mode: '' | AfterChange
       last: HistoryEntry | null
+      history: HistoryEntry[]
     }
   }
 }

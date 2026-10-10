@@ -3,32 +3,44 @@
 // The mod never starts a test: Claude runs kane-cli, the mod reads what kane-cli leaves on disk.
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderSurface, TextProps } from 'claude-code'
-import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, Status, Step, View } from '../types'
+import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, Status, Step, UseCase, View } from '../types'
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells } from './mascot'
+import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
+  HISTORY_MAX,
   ORDER,
   band,
   bar,
+  cardFailures,
+  cardHeader,
   currentStep,
+  cells,
   cut,
   debt,
   draftPrompt,
   elapsed,
+  firstLine,
   fmt,
   fold,
   foldMember,
+  gapsPrompt,
+  gridSince,
+  historyDetail,
+  historyEntry,
+  isRunCommand,
   isTrackedEdit,
   kindLine,
+  latest,
   labelFromCommand,
   leaves,
   newRun,
   nm,
   nowText,
   objectiveFrom,
+  onGrid,
   parseCoverGaps,
   ago,
   savedTestsFor,
@@ -51,6 +63,7 @@ const changeAtom = atom({ plugin: 'kane-qe', key: 'change' } as const, null as C
 const offerAtom = atom({ plugin: 'kane-qe', key: 'offer' } as const, null as Offer | null)
 const modeAtom = atom({ plugin: 'kane-qe', key: 'mode' } as const, '' as '' | AfterChange)
 const lastAtom = atom({ plugin: 'kane-qe', key: 'last' } as const, null as HistoryEntry | null)
+const historyAtom = atom({ plugin: 'kane-qe', key: 'history' } as const, [] as HistoryEntry[])
 
 type Kit = Pick<Elements['mobile'], 'Box' | 'Text' | 'Button'>
 type Table = Elements[RenderSurface]
@@ -72,9 +85,15 @@ type Watch = { id: string; path: string; pointer?: string; pid?: number; bytes: 
 const watches = new Map<string, Watch>()
 const seenPointers = new Set<string>()
 /** kane-cli commands Claude ran, to name the runs they start. */
-const commands: { label: string; surface: Kind; at: number; used: boolean }[] = []
+const commands: { label: string; surface: Kind; at: number; used: boolean; toolUseId?: string }[] = []
+/** Evidence viewers this session started, by pack: the link each one printed. */
+const viewers = new Map<string, string>()
+/** Ended runs whose evidence pack is still being looked for, by run id: when to stop looking. */
+const seeking = new Map<string, number>()
 let polling = false
 const sites = new Set<string>()
+/** Sites that draw the running-step spinner: repainted in place with the mascot. */
+const spinSites = new Set<string>()
 let frame = 0
 let thinking = false
 let remote = false
@@ -94,10 +113,18 @@ function text(ui: Kit, s: Span) {
 
 const item = (ui: Kit, i: Item) => (Array.isArray(i) ? <ui.Box flexDirection="row">{i.filter(s => s.t !== '').map(s => text(ui, s))}</ui.Box> : text(ui, i))
 
-function line(ui: Kit, press: Press, r: Row) {
+// A step while its test runs: a spinner in front, so it reads as work in progress and not as a sentence.
+// One cell repainted in place on a terminal; a glyph that steps with each redraw elsewhere.
+function spinner(table: Table, surface: RenderSurface, n: number) {
+  if (surface === 'terminal' && 'Raster' in table) return <table.Raster key="spin" columns={1} rows={1} cells={spinnerCells(n, C.cyan)} />
+  return <table.Text color={C.cyan}>{spinnerGlyph(n)}</table.Text>
+}
+
+function line(ui: Kit, press: Press, r: Row, lead?: ReturnType<typeof spinner>) {
   if (r.items.length === 0 && !r.button) return <ui.Text> </ui.Text>
   return (
     <ui.Box flexDirection="row" gap={1}>
+      {r.spin && lead ? lead : null}
       {r.items.map(i => item(ui, i))}
       {r.button ? <ui.Button key={r.button.key} label={r.button.label} variant="primary" onPress={() => press(r.button?.act ?? '')} /> : null}
     </ui.Box>
@@ -133,7 +160,7 @@ const meta = (r: Run) => [r.kind, r.target].filter(Boolean).join(' · ')
 function runCard(ui: Kit, press: Press, r: Run, now: number, width: number) {
   const isSuite = r.kind === 'testrun' && r.members
   const c = isSuite ? tally(r.members ?? []) : undefined
-  const second = c ? `${c.passed + c.failed} of ${c.total} tests done${c.running ? ` · ${c.running} running` : ''}${c.failed ? ` · ${c.failed} failed` : ''}` : summary(r)
+  const second = c ? (onGrid(r) ? `${c.total} test${c.total === 1 ? '' : 's'} on the grid · ${gridSince(r, now)}` : `${c.passed + c.failed} of ${c.total} tests done${c.running ? ` · ${c.running} running` : ''}${c.failed ? ` · ${c.failed} failed` : ''}`) : summary(r)
   return (
     <ui.Box key={`card-${r.id}`} flexDirection="column" borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.dim} paddingX={1}>
       <ui.Box flexDirection="row" gap={1}>
@@ -164,6 +191,18 @@ const sortRuns = (list: readonly Run[]) => [...list].sort((a, b) => ORDER[a.stat
 /** A suite's tests by state, each state in the plan's order. */
 const sortMembers = (list: readonly Run[]) => list.map((m, i) => ({ m, i })).sort((a, b) => ORDER[a.m.status] - ORDER[b.m.status] || a.i - b.i).map(x => x.m)
 
+/** Where a remote suite is running: the grid, its job, and why nothing moves until it ends. */
+function gridFacts(ui: Kit, s: Run) {
+  const r = s.remote ?? {}
+  return (
+    <ui.Box flexDirection="column">
+      {fact(ui, 'grid', [r.backend ?? 'remote', r.jobId ? `job ${r.jobId}` : ''].filter(Boolean).join(' · '))}
+      {r.jobUrl ? fact(ui, 'link', r.jobUrl) : null}
+      {onGrid(s) ? <ui.Text dimColor>The grid reports each test when the job ends. Open the link to watch it there.</ui.Text> : null}
+    </ui.Box>
+  )
+}
+
 function suiteView(ui: Kit, press: Press, s: Run, now: number, width: number, back: boolean) {
   const c = tally(s.members ?? [])
   return (
@@ -172,7 +211,8 @@ function suiteView(ui: Kit, press: Press, s: Run, now: number, width: number, ba
         {back ? <ui.Button key="back" label="‹ Runs" plain dimColor onPress={() => press('back')} /> : null}
         <ui.Text bold>{cut(s.label, width - 10)}</ui.Text>
       </ui.Box>
-      <ui.Text dimColor>{c.total ? `${c.passed + c.failed} of ${c.total} done · ${c.running} running · ${c.pending} waiting` : 'planning the suite'}</ui.Text>
+      <ui.Text dimColor>{onGrid(s) ? `${c.total ? `${c.total} test${c.total === 1 ? '' : 's'} on the grid · ` : ''}${gridSince(s, now)}` : c.total ? `${c.passed + c.failed} of ${c.total} done · ${c.running} running · ${c.pending} waiting` : 'planning the suite'}</ui.Text>
+      {s.remote ? gridFacts(ui, s) : null}
       <ui.Text> </ui.Text>
       {sortMembers(s.members ?? []).map(m => memberRow(ui, press, m, now, width))}
     </ui.Box>
@@ -255,7 +295,7 @@ function runDetail(ui: Kit, press: Press, r: Run, now: number, width: number) {
   )
 }
 
-function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null, now: number) {
+function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null, now: number, width: number) {
   const files = o?.files ?? change?.files ?? []
   const saved = o?.saved ?? []
   const hasDraft = !!(o && (o.drafting || o.objective || o.note))
@@ -285,7 +325,10 @@ function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null
             return (
               <ui.Box key={`saved-${t}`} flexDirection="row" gap={1}>
                 <ui.Box flexShrink={1}>
-                  <ui.Text dimColor>{last ? `${t} · last ${last.status === 'passed' ? '✓' : '✗'} ${ago(now - last.at)}` : t}</ui.Text>
+                  <ui.Text dimColor>{(() => {
+                    const tail = last ? ` · last ${last.status === 'passed' ? '✓' : '✗'} ${ago(now - last.at)}` : ''
+                    return `${cut(t.replace(/_test\.md$/, ''), Math.max(12, width - tail.length - 12))}${tail}`
+                  })()}</ui.Text>
                 </ui.Box>
                 <ui.Button key={`saved-run-${t}`} label="Run it" onPress={() => press(`saved:${t}`)} />
               </ui.Box>
@@ -303,8 +346,102 @@ function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null
   )
 }
 
-function assureView(ui: Kit, press: Press, a: Assurance, now: number) {
+/** One use case: its bars, then what it still owes, to design first and to run after, each with kane-cli's own next command. */
+function useCaseView(ui: Kit, press: Press, u: UseCase) {
+  const pct = (n: number | undefined) => (n === undefined ? '   –' : `${String(n).padStart(3)}%`)
+  const listed = u.pending.length
+  const owed = u.toDesign + u.toCover
+  const group = (stage: 'design' | 'cover', title: string) => {
+    const rows = u.pending.filter(p => p.stage === stage)
+    if (!rows.length) return null
+    // Rows that share one reason and one next command say them once, under the list.
+    const shared = rows.length > 1 && rows.every(p => p.why === rows[0]!.why && p.command === rows[0]!.command)
+    return (
+      <ui.Box key={`owed-${stage}`} flexDirection="column">
+        <ui.Text bold>{title}</ui.Text>
+        {rows.map((p, i) => (
+          <ui.Box key={`owed-${stage}-${i}`} flexDirection="column">
+            <ui.Box flexDirection="row" gap={1}>
+              <ui.Text color={p.risk === 'high' ? C.coral : C.dim}>{p.risk === 'high' ? '▲' : '·'}</ui.Text>
+              <ui.Box flexShrink={1}>
+                <ui.Text>{p.title}</ui.Text>
+              </ui.Box>
+            </ui.Box>
+            {shared ? null : (
+              <ui.Box flexDirection="column" paddingLeft={2}>
+                {p.why ? fact(ui, 'why', p.why) : null}
+                {p.command ? fact(ui, 'next', p.command, C.purple) : null}
+              </ui.Box>
+            )}
+          </ui.Box>
+        ))}
+        {shared && rows[0]!.why ? fact(ui, 'why', rows[0]!.why) : null}
+        {shared && rows[0]!.command ? fact(ui, 'next', rows[0]!.command, C.purple) : null}
+        <ui.Text> </ui.Text>
+      </ui.Box>
+    )
+  }
+  return (
+    <ui.Box flexDirection="column">
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Button key="uc-back" label="‹ Assurance" plain dimColor onPress={() => press('uc-back')} />
+        <ui.Text bold>{u.id}</ui.Text>
+      </ui.Box>
+      {u.title ? <ui.Text>{u.title}</ui.Text> : null}
+      <ui.Box flexDirection="row" gap={1}>
+        {u.risk ? <ui.Text color={u.risk === 'high' ? C.coral : C.dim}>{`${u.risk} risk`}</ui.Text> : null}
+        {debt(u).map(s => text(ui, s))}
+      </ui.Box>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text dimColor>designed</ui.Text>
+        {item(ui, bar(12, u.designed / 100, C.yellow))}
+        <ui.Text>{pct(u.designed)}</ui.Text>
+      </ui.Box>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text dimColor>proven  </ui.Text>
+        {item(ui, bar(12, (u.proven ?? 0) / 100, C.yellow))}
+        <ui.Text>{pct(u.proven)}</ui.Text>
+      </ui.Box>
+      <ui.Text> </ui.Text>
+      {owed === 0 ? <ui.Text dimColor>Nothing owed: every criterion has a test{u.proven === 100 ? ' and a passing run' : ''}.</ui.Text> : null}
+      {group('design', 'To design')}
+      {group('cover', 'To run')}
+      {owed > listed ? <ui.Text dimColor>{`+${owed - listed} more: kane-cli cover gaps ${u.id}`}</ui.Text> : null}
+      {owed > 0 ? <ui.Button key="uc-close" label="Close these gaps with Claude" variant="primary" onPress={() => press(`uc-close:${u.id}`)} /> : null}
+    </ui.Box>
+  )
+}
+
+/** Finished runs the mod has seen in this project, newest first. */
+function historyView(ui: Kit, list: readonly HistoryEntry[], now: number, width: number) {
+  if (list.length === 0) return <ui.Text dimColor>No finished kane-cli run seen in this project yet. Each run is kept here when it ends.</ui.Text>
+  const c = { passed: list.filter(x => x.status === 'passed').length, failed: list.filter(x => x.status === 'failed').length }
+  return (
+    <ui.Box flexDirection="column">
+      <ui.Text dimColor>{`last ${list.length} run${list.length === 1 ? '' : 's'} here · ${c.passed} passed · ${c.failed} failed`}</ui.Text>
+      <ui.Text> </ui.Text>
+      {list.map((entry, i) => (
+        <ui.Box key={`history-${i}`} flexDirection="column">
+          <ui.Box flexDirection="row" gap={1}>
+            {glyph(ui, entry.status)}
+            <ui.Box flexShrink={1}>
+              <ui.Text bold={entry.status === 'failed'}>{cut(nm(entry), Math.max(16, width - 14))}</ui.Text>
+            </ui.Box>
+            <ui.Text dimColor>{ago(now - entry.at)}</ui.Text>
+          </ui.Box>
+          <ui.Box paddingLeft={2}>
+            <ui.Text dimColor>{cut([entry.kind, historyDetail(entry)].filter(Boolean).join(' · '), Math.max(20, width * 2 - 4))}</ui.Text>
+          </ui.Box>
+        </ui.Box>
+      ))}
+    </ui.Box>
+  )
+}
+
+function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: string) {
   if (a.state === 'unknown') return <ui.Text dimColor>Reading the requirement store…</ui.Text>
+  const opened = a.state === 'ready' && open ? a.useCases.find(u => u.id === open) : undefined
+  if (opened) return useCaseView(ui, press, opened)
   if (a.state === 'none') {
     return (
       <ui.Box flexDirection="column" borderStyle="round" borderColor={C.yellow} paddingX={1}>
@@ -340,7 +477,12 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number) {
       {a.useCases.map(u => (
         <ui.Box key={`uc-${u.id}`} flexDirection="column" borderStyle="round" borderColor={C.dim} paddingX={1}>
           <ui.Box flexDirection="row" gap={1}>
-            <ui.Text bold>{u.id}</ui.Text>
+            <ui.Button key={`uc-${u.id}`} label={u.id} plain onPress={() => press(`uc:${u.id}`)} />
+            {u.title ? (
+              <ui.Box flexShrink={1}>
+                <ui.Text>{u.title}</ui.Text>
+              </ui.Box>
+            ) : null}
             {debt(u).map(s => text(ui, s))}
           </ui.Box>
           <ui.Box flexDirection="row" gap={1}>
@@ -353,6 +495,81 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number) {
           </ui.Box>
         </ui.Box>
       ))}
+    </ui.Box>
+  )
+}
+
+/** A run Claude started, as a card in the chat in place of its shell row: one line while it runs, then its result. */
+function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean) {
+  const ui: Kit = table
+  if (r.status === 'running' || r.status === 'pending') {
+    const suite = r.kind === 'testrun' && r.members ? cardHeader(r, now, columns).result : undefined
+    return (
+      <ui.Box flexDirection="row" gap={1} marginTop={1}>
+        {spinner(table, surface, frame)}
+        <ui.Text color={C.purple} bold>
+          kane
+        </ui.Text>
+        <ui.Text dimColor>·</ui.Text>
+        <ui.Text bold>{cut(nm(r), Math.max(12, Math.floor(columns / 3)))}</ui.Text>
+        {suite ? suite.map(s => text(ui, s)) : <ui.Text dimColor>{fmt(elapsed(r, now))}</ui.Text>}
+        {suite ? null : <ui.Text dimColor>·</ui.Text>}
+        {suite ? null : (
+          <ui.Box flexShrink={1}>
+            <ui.Text>{cut(nowText(r), Math.max(10, columns - Math.floor(columns / 3) - 22))}</ui.Text>
+          </ui.Box>
+        )}
+      </ui.Box>
+    )
+  }
+  const width = Math.max(48, Math.min(88, columns - 2))
+  const inner = width - RASTER.columns - 6
+  const head = cardHeader(r, now, inner)
+  const isSuite = r.kind === 'testrun' && !!r.members
+  const failures = isSuite ? cardFailures(r) : undefined
+  const kind = kindLine(r)
+  const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
+  return (
+    <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.mint} paddingX={1}>
+      {mascot(table, surface, false, 0)}
+      <ui.Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
+          <ui.Box flexDirection="row" gap={1} flexShrink={1}>
+            <ui.Text color={C.purple} bold>
+              kane
+            </ui.Text>
+            <ui.Text dimColor>·</ui.Text>
+            <ui.Text bold>{head.name}</ui.Text>
+          </ui.Box>
+          <ui.Box flexDirection="row" gap={1} flexShrink={0}>
+            {head.result.map((s, i) => (i === 0 ? text(ui, s) : <ui.Box flexDirection="row" gap={1}>{[<ui.Text dimColor>·</ui.Text>, text(ui, s)]}</ui.Box>))}
+          </ui.Box>
+        </ui.Box>
+        {isSuite ? item(ui, cells((r.members ?? []).map(m => m.status))) : null}
+        {failures?.rows.map(m => (
+          <ui.Box key={`card-fail-${m.id}`} flexDirection="row" gap={1}>
+            <ui.Text color={C.coral}>{`✗ ${cut(nm(m), 24)}`}</ui.Text>
+            <ui.Text dimColor>{m.failure?.where ? 'failed on' : 'failed'}</ui.Text>
+            <ui.Box flexShrink={1}>
+              <ui.Text>{cut(m.failure?.where ?? m.failure?.why ?? '', Math.max(10, inner - 38))}</ui.Text>
+            </ui.Box>
+          </ui.Box>
+        ))}
+        {failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null}
+        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', cut(firstLine(r.failure.where), Math.max(20, inner * 2 - 8))) : null}
+        {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
+        {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
+        {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
+        {clickable ? <ui.Text> </ui.Text> : null}
+        {clickable ? (
+          <ui.Box flexDirection="row" gap={1}>
+            {isSuite || r.status === 'failed' ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
+            {r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+          </ui.Box>
+        ) : r.evidence ? (
+          fact(ui, 'evidence', r.evidence)
+        ) : null}
+      </ui.Box>
     </ui.Box>
   )
 }
@@ -397,11 +614,11 @@ async function readNew($: EngineInterface, w: Watch): Promise<string[]> {
 }
 
 /** The label Claude's own command gives a run that started just now in this project. */
-function claimCommand(surface: Kind, started: number): string | undefined {
+function claimCommand(surface: Kind, started: number): { label: string; toolUseId?: string } | undefined {
   const c = [...commands].reverse().find(x => !x.used && x.surface === surface && started >= x.at - 5_000 && started - x.at < 120_000)
   if (!c) return undefined
   c.used = true
-  return c.label
+  return { label: c.label, toolUseId: c.toolUseId }
 }
 
 /** Applies one file's new lines to the runs; reports the runs that just ended. */
@@ -461,7 +678,7 @@ async function poll($: EngineInterface) {
       seenPointers.add(e.name)
       const p = parsePointer((await $.fs.read(`${activeDir}/${e.name}`).catch(() => '')) ?? '', now)
       if (!p || !inside(p.cwd, projectDir) || !(await alive($, p.pid))) continue
-      runs = startWatch(runs, p, e.name)
+      runs = startWatch(runs, p, e.name, await processLabel($, p.pid))
       changed = true
     }
     // Members first, so a suite's end reads its members' last lines; a member a suite names now is read now too.
@@ -489,30 +706,110 @@ async function poll($: EngineInterface) {
     for (const [k, w] of watches) if (w.done) watches.delete(k)
     if (changed) await update($, runsAtom, () => runs)
     for (const r of ended) await finished($, r)
+    for (const r of ended) seeking.set(r.id, now + 30_000)
+    if (seeking.size) await seekEvidence($, now)
     if (runs.some(r => r.status === 'running' || r.status === 'pending')) await update($, tickAtom, n => n + 1)
   } finally {
     polling = false
   }
 }
 
-function startWatch(runs: Run[], p: Pointer, pointer: string): Run[] {
+/** kane-cli seals a run's evidence pack as it exits: `<session dir>/evidence/<id>.evidence`, and a suite's in the project's store under its execution id. */
+async function findEvidence($: EngineInterface, r: Run): Promise<string | undefined> {
+  if (r.executionId && r.cwd) {
+    const stored = `${r.cwd}/.testmuai/evidence/${r.executionId}.evidence`
+    if (await $.fs.exists(stored).catch(() => false)) return stored
+  }
+  const dir = `${r.sessionDir}/evidence`
+  const packs = (await $.fs.list(dir).catch(() => [])).filter(e => e.kind === 'file' && e.name.endsWith('.evidence'))
+  return packs.length === 1 ? `${dir}/${packs[0]!.name}` : undefined
+}
+
+/** Looks for the pack of each run that just ended, for half a minute at most. */
+async function seekEvidence($: EngineInterface, now: number) {
+  const runs = await read($, runsAtom)
+  const found = new Map<string, string>()
+  for (const [id, until] of seeking) {
+    const r = runs.find(x => x.id === id)
+    const pack = r && !r.evidence ? await findEvidence($, r) : undefined
+    if (pack) found.set(id, pack)
+    if (pack || !r || r.evidence || now > until) seeking.delete(id)
+  }
+  if (found.size) await update($, runsAtom, list => list.map(r => (found.has(r.id) ? { ...r, evidence: found.get(r.id) } : r)))
+}
+
+/** Starts kane-cli's local evidence viewer for a pack and answers the link it prints; the viewer lives until the session ends. */
+function startViewer($: EngineInterface, pack: string): Promise<string | undefined> {
+  return new Promise(resolve => {
+    let said = false
+    const say = (url: string | undefined) => {
+      if (said) return
+      said = true
+      resolve(url)
+    }
+    void $.clock.sleep(15_000).then(() => say(undefined), () => say(undefined))
+    void (async () => {
+      let text = ''
+      try {
+        for await (const piece of $.process.spawn({ argv: [...kane, 'evidence', 'serve', pack], cwd: projectDir })) {
+          text = (text + piece.text).slice(-4000)
+          const link = text.match(/viewer\s+(https?:\/\/\S+)/)
+          if (link && !viewers.has(pack)) {
+            viewers.set(pack, link[1]!)
+            say(link[1])
+          }
+        }
+      } catch {
+        // the viewer could not start: the caller falls back
+      }
+      viewers.delete(pack)
+      say(undefined)
+    })()
+  })
+}
+
+/** One click to a run's evidence: its pack in kane-cli's viewer, in the browser. Without a pack or a viewer, Claude is asked instead. */
+async function openEvidence($: EngineInterface, id: string) {
+  const all = await read($, runsAtom)
+  const r = all.find(x => x.id === id) ?? leaves(all).find(x => x.id === id)
+  const pack = r?.evidence
+  const url = pack ? (viewers.get(pack) ?? (await startViewer($, pack))) : undefined
+  if (url) {
+    const opened = await $.process.run(['open', url], { timeoutMs: 5000 }).catch(() => undefined)
+    if (opened?.exitCode !== 0) await $.process.run(['xdg-open', url], { timeoutMs: 5000 }).catch(() => undefined)
+    $.ui.toast('Evidence opened in the browser')
+    return
+  }
+  void $.prompt.submit({ text: `Open the evidence for the kane-cli run in ${pack ?? r?.sessionDir ?? id}.` }).catch(() => undefined)
+}
+
+/** A run nobody started in this chat is named from its own process: the command line kane-cli was started with. */
+async function processLabel($: EngineInterface, pid: number): Promise<string | undefined> {
+  const r = await $.process.run(['ps', '-o', 'args=', '-p', String(pid)], { timeoutMs: 3000 }).catch(() => undefined)
+  return r?.exitCode === 0 ? labelFromCommand(r.stdout)?.label : undefined
+}
+
+function startWatch(runs: Run[], p: Pointer, pointer: string, fromProcess?: string): Run[] {
   const id = p.sessionDir
-  const label = claimCommand(p.surface, p.started)
-  const run = newRun(id, p.surface, p.sessionDir, p.started, { pid: p.pid, cwd: p.cwd, ...(label ? { label, labelRank: RANK.command } : {}) })
+  const claimed = claimCommand(p.surface, p.started) ?? (fromProcess ? { label: fromProcess } : undefined)
+  const run = newRun(id, p.surface, p.sessionDir, p.started, { pid: p.pid, cwd: p.cwd, ...(claimed ? { label: claimed.label, labelRank: RANK.command } : {}), ...(claimed?.toolUseId ? { toolUseId: claimed.toolUseId } : {}) })
   // A reload follows the file again from its start, replacing what the last module folded.
   watches.set(id, { id, path: `${p.sessionDir}/events.ndjson`, pointer, pid: p.pid, bytes: 0, rest: '', done: false })
   const keep = runs.find(r => r.id === id)
-  const fresh = keep ? { ...run, label: keep.labelRank && keep.labelRank >= RANK.command ? keep.label : run.label, labelRank: Math.max(keep.labelRank ?? 0, run.labelRank ?? 0) } : run
+  const fresh = keep ? { ...run, toolUseId: run.toolUseId ?? keep.toolUseId, label: keep.labelRank && keep.labelRank >= RANK.command ? keep.label : run.label, labelRank: Math.max(keep.labelRank ?? 0, run.labelRank ?? 0) } : run
   return [...runs.filter(r => r.id !== id), fresh]
 }
 
 /** A run reached its end: remember it, refresh assurance, and clear a change it covered. */
 async function finished($: EngineInterface, r: Run) {
   if (r.status !== 'passed' && r.status !== 'failed') return
-  const entry: HistoryEntry = { label: r.label, status: r.status, at: r.endedAt ?? r.startedAt, where: r.failure?.where }
+  const entry = historyEntry(r)
+  if (!entry) return
   await update($, lastAtom, () => entry)
   const all = await recent($)
-  all[projectDir] = [entry, ...(all[projectDir] ?? [])].slice(0, 10)
+  const list = [entry, ...(all[projectDir] ?? [])].slice(0, HISTORY_MAX)
+  all[projectDir] = list
+  await update($, historyAtom, () => list)
   await $.store.set(RECENT, all).catch(() => undefined)
   const change = await read($, changeAtom)
   if (change && r.startedAt > change.lastAt) {
@@ -554,8 +851,9 @@ async function readTheme($: EngineInterface) {
 }
 
 async function loadLast($: EngineInterface) {
-  const all = await recent($)
-  const last = all[projectDir]?.[0]
+  const list = (await recent($))[projectDir] ?? []
+  if (list.length) await update($, historyAtom, () => list)
+  const last = list[0]
   if (last) await update($, lastAtom, () => last)
 }
 
@@ -597,13 +895,13 @@ async function openOffer($: EngineInterface) {
   await update($, viewAtom, v => ({ ...v, tab: 'runs' as const, open: 'offer' }))
   await openPane($)
   const tests = await savedTests($)
-  const saved = savedTestsFor(files, tests)
   const history = (await recent($))[projectDir] ?? []
   const last: Record<string, HistoryEntry> = {}
-  for (const name of saved) {
-    const hit = history.find(h => h.label === name || h.label.endsWith(`/${name}`))
-    if (hit) last[name] = hit
+  for (const t of tests) {
+    const hit = history.find(h => h.label === t.name || h.label.endsWith(`/${t.name}`))
+    if (hit) last[t.name] = hit
   }
+  const saved = savedTestsFor(files, tests, last)
   await update($, offerAtom, () => ({ files, drafting: false, saved, url: startUrl(tests), last }))
   // A saved test that covers the change comes first; Claude drafts a new objective only when none does.
   if (saved.length === 0) await draftObjective($)
@@ -630,11 +928,11 @@ function autoInstruction(files: readonly string[], saved: readonly string[], url
 }
 
 /** A kane-cli command Claude is about to run names the run it starts. */
-async function beforeTool($: EngineInterface, e: { tool: string; command?: unknown }) {
+async function beforeTool($: EngineInterface, e: { tool: string; command?: unknown; tool_use_id?: string }) {
   if (e.tool !== 'Bash') return
   const named = labelFromCommand(String(e.command ?? ''))
   if (!named) return
-  commands.push({ ...named, at: await $.clock.now(), used: false })
+  commands.push({ ...named, at: await $.clock.now(), used: false, toolUseId: e.tool_use_id })
   if (commands.length > 20) commands.shift()
 }
 
@@ -684,8 +982,14 @@ async function act($: EngineInterface, a: string) {
   const arg = at < 0 ? '' : a.slice(at + 1)
   if (k === 'open') await openPane($)
   else if (k === 'tab') {
-    await update($, viewAtom, v => ({ ...v, tab: arg === 'assure' ? ('assure' as const) : ('runs' as const), open: '' }))
+    await update($, viewAtom, v => ({ ...v, tab: arg === 'assure' ? ('assure' as const) : arg === 'history' ? ('history' as const) : ('runs' as const), open: '', uc: '' }))
     await openPane($)
+  } else if (k === 'uc') await update($, viewAtom, v => ({ ...v, tab: 'assure' as const, uc: arg }))
+  else if (k === 'uc-back') await update($, viewAtom, v => ({ ...v, uc: '' }))
+  else if (k === 'uc-close') {
+    const a = await read($, assuranceAtom)
+    const u = a.state === 'ready' ? a.useCases.find(x => x.id === arg) : undefined
+    if (u) void $.prompt.submit({ text: gapsPrompt(u) }).catch(() => undefined)
   } else if (k === 'run') await update($, viewAtom, v => ({ ...v, open: arg, tab: 'runs' as const }))
   else if (k === 'back') await update($, viewAtom, v => ({ ...v, open: '' }))
   else if (k === 'offer') await openOffer($)
@@ -708,10 +1012,10 @@ async function act($: EngineInterface, a: string) {
     await update($, offerAtom, () => null)
     await update($, changeAtom, c => (c ? { ...c, shown: false } : c))
     await update($, viewAtom, v => ({ ...v, open: '' }))
-  } else if (k === 'evidence') {
-    const r = leaves(await read($, runsAtom)).concat(await read($, runsAtom)).find(x => x.id === arg)
-    const dir = r?.sessionDir || arg
-    void $.prompt.submit({ text: `Open the evidence for the kane-cli run in ${dir}.` }).catch(() => undefined)
+  } else if (k === 'evidence') await openEvidence($, arg)
+  else if (k === 'steps') {
+    await update($, viewAtom, v => ({ ...v, tab: 'runs' as const, open: arg, uc: '' }))
+    await openPane($)
   } else if (k === 'setup') {
     void $.prompt.submit({
       text: 'Set up kane-cli assurance for this project: ask me for the requirement (a PRD file, a Jira, Confluence or Linear link, or a web page), ingest it with kane-cli, extract the use cases and design tests (use --mode agent), then show me the coverage with kane-cli cover gaps.',
@@ -733,6 +1037,8 @@ function paint($: EngineInterface) {
   if (!remote) frame += 1
   const cells = rasterCells(pixelFrame(poseAt(true, frame)))
   for (const requestId of sites) void $.ui.blit({ requestId, key: 'mascot', cells }).catch(() => sites.delete(requestId))
+  const spin = spinnerCells(frame, C.cyan)
+  for (const requestId of spinSites) void $.ui.blit({ requestId, key: 'spin', cells: spin }).catch(() => spinSites.delete(requestId))
 }
 
 // ── the mod ──────────────────────────────────────────────────────────────
@@ -748,7 +1054,7 @@ export const register: Register = (on, options) => {
     projectDir = String((e as { cwd?: unknown }).cwd ?? '').replace(/\/$/, '')
     const home = await $.env.get('HOME').catch(() => undefined)
     if (home) activeDir = `${home}/.testmuai/kaneai/sessions/active`
-    await $.command.register({ name: 'kane', description: 'Kane: open the runs pane; /kane assurance; /kane auto | ask | off for changes', argumentHint: '[assurance | auto | ask | off]' })
+    await $.command.register({ name: 'kane', description: 'Kane: open the runs pane; /kane assurance; /kane history; /kane auto | ask | off for changes', argumentHint: '[assurance | history | auto | ask | off]' })
     $.clock.every(1000, () => void poll($).catch(() => undefined))
     $.clock.every(STEP_MS, () => paint($))
     $.clock.every(STEP_MS, () => void pulse($).catch(() => undefined))
@@ -776,12 +1082,16 @@ export const register: Register = (on, options) => {
       await act($, 'tab:assure')
       return { text: 'Kane: assurance for this project.' }
     }
+    if (arg === 'history') {
+      await act($, 'tab:history')
+      return { text: 'Kane: finished runs in this project.' }
+    }
     if (arg === 'auto' || arg === 'ask' || arg === 'off') {
       const mode: AfterChange = arg === 'ask' ? 'offer' : arg
       await update($, modeAtom, () => mode)
       return { text: `Kane: after Claude changes code, ${mode === 'auto' ? 'Claude tests it before it finishes' : mode === 'offer' ? 'the band offers to test it' : 'nothing happens'} (this session).` }
     }
-    return { text: 'Kane: /kane opens the pane · /kane assurance · /kane auto | ask | off sets what happens after Claude changes code.' }
+    return { text: 'Kane: /kane opens the pane · /kane assurance · /kane history · /kane auto | ask | off sets what happens after Claude changes code.' }
   })
 
   // These three sit in the path of what the person and Claude do: the mod's own work is caught, the action always goes on.
@@ -800,6 +1110,36 @@ export const register: Register = (on, options) => {
     return block ? { ...result, block } : result
   })
 
+  // A kane-cli run Claude started is drawn as a card in the chat, in place of its shell row.
+  // The chat folds shell calls into one count line: a group holding a run is unfolded, so its row is drawn.
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    if (e.props.isExpanded || !e.props.calls.some(c => c.tool === 'Bash' && isRunCommand(String((c.input as { command?: unknown } | undefined)?.command ?? '')))) return next(e)
+    return next({ ...e, props: { ...e.props, isExpanded: true } })
+  })
+
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (e.props.tool !== 'Bash' || !isRunCommand(String((e.props.input as { command?: unknown } | undefined)?.command ?? ''))) return next(e)
+    const r = (await read($, runsAtom)).find(x => x.toolUseId === e.props.tool_use_id)
+    // No run came of the command (kane-cli refused or failed to start): its own row says why.
+    if (!r) return next(e)
+    await read($, tickAtom)
+    const press: Press = a => void act($, a).catch(() => undefined)
+    // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
+    const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
+    if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
+    else spinSites.delete(e.requestId)
+    return chatCard($.ui.resolve(e), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
+  })
+
+  // The card stands for the whole call: once the run has a result, kane-cli's raw output is not drawn beneath it.
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (e.props.tool !== 'Bash') return next(e)
+    const r = (await read($, runsAtom)).find(x => x.toolUseId === e.props.tool_use_id)
+    if (!r || (r.status !== 'passed' && r.status !== 'failed')) return next(e)
+    const ui: Kit = $.ui.resolve(e)
+    return <ui.Box />
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const runs = await read($, runsAtom)
@@ -815,11 +1155,13 @@ export const register: Register = (on, options) => {
     const table = $.ui.resolve(e)
     if (e.surface === 'terminal') sites.add(e.requestId)
     else remote = true
+    if (e.surface === 'terminal' && model.rows.some(r => r.spin)) spinSites.add(e.requestId)
+    else spinSites.delete(e.requestId)
     const press: Press = a => void act($, a).catch(() => undefined)
     return (
       <table.Box flexDirection="row" gap={1}>
         {mascot(table, e.surface, model.think, frame)}
-        <table.Box flexDirection="column">{model.rows.map(r => line(table, press, r))}</table.Box>
+        <table.Box flexDirection="column">{model.rows.map(r => line(table, press, r, spinner(table, e.surface, frame)))}</table.Box>
       </table.Box>
     )
   })
@@ -830,7 +1172,8 @@ export const register: Register = (on, options) => {
     const runs = await read($, runsAtom)
     const now = await $.clock.now()
     const all = leaves(runs)
-    const c = tally(all)
+    // The header counts each test once, by its latest result, as the band does; the list below keeps every run.
+    const c = tally(all.some(r => r.status === 'running' || r.status === 'pending') ? all : latest(all))
     const width = Math.max(30, e.props.bodyColumns - 2)
     const table = $.ui.resolve(e)
     const ui: Kit = table
@@ -839,8 +1182,9 @@ export const register: Register = (on, options) => {
     const press: Press = a => void act($, a).catch(() => undefined)
     const opened = all.find(r => r.id === v.open) ?? runs.find(r => r.id === v.open)
     let body
-    if (v.tab === 'assure') body = assureView(ui, press, await read($, assuranceAtom), now)
-    else if (v.open === 'offer') body = offerView(ui, press, await read($, offerAtom), await read($, changeAtom), now)
+    if (v.tab === 'assure') body = assureView(ui, press, await read($, assuranceAtom), now, v.uc)
+    else if (v.tab === 'history') body = historyView(ui, await read($, historyAtom), now, width)
+    else if (v.open === 'offer') body = offerView(ui, press, await read($, offerAtom), await read($, changeAtom), now, width)
     else if (opened?.kind === 'testrun' && opened.members) body = suiteView(ui, press, opened, now, width, true)
     else if (opened) body = runDetail(ui, press, opened, now, width)
     else body = runsView(ui, press, runs, now, width, await read($, lastAtom))
@@ -856,6 +1200,7 @@ export const register: Register = (on, options) => {
             <ui.Box flexDirection="row" gap={1}>
               <ui.Button key="tab-runs" label="Runs" variant={v.tab === 'runs' ? 'primary' : 'secondary'} onPress={() => press('tab:runs')} />
               <ui.Button key="tab-assure" label="Assurance" variant={v.tab === 'assure' ? 'primary' : 'secondary'} onPress={() => press('tab:assure')} />
+              <ui.Button key="tab-history" label="History" variant={v.tab === 'history' ? 'primary' : 'secondary'} onPress={() => press('tab:history')} />
             </ui.Box>
           </ui.Box>
         </ui.Box>

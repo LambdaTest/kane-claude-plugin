@@ -5,7 +5,7 @@ The design ([kane-cli mod: terminal build guide](https://claude.ai/artifact/5Dkz
 How each item was checked:
 - **live**: in a real Claude Code session in a terminal, with a real kane-cli run;
 - **staged**: a real Claude Code session, with kane-cli runs written to disk in kane-cli 0.8.20's own format, by `sleep` processes standing in for kane-cli;
-- **test**: `claude plugin test kane-qe` (81 tests).
+- **test**: `claude plugin test kane-qe` (127 tests).
 
 ## Features (design part 1, "What to build")
 
@@ -19,7 +19,7 @@ How each item was checked:
 | 6 | Suite progress | One cell per test, `5 of 12 tests done · 3 running · 4 left`, running tests on row 2 | live (3-test suite), staged (12), test |
 | 7 | Failures shown at once | The newest failure takes row 2 the moment it happens, in a suite too | live, staged |
 | 8 | Results when idle | `✓ 4 passed · ✗ 1 failed`, the failed test and its step; `last run ✓ login · 2h ago` from earlier sessions | live, test |
-| 9 | Details pane | `/kane` or `[ Open ]`: Runs and Assurance tabs | live |
+| 9 | Details pane | `/kane` or `[ Open ]`: Runs and Assurance tabs (a History tab was added later, see below) | live |
 | 10 | Step-by-step view | Steps with ticks and times; the current or failing step opens to think, act and checks | staged, test |
 | 11 | Failure explanation | why, kind (category · severity · confidence), where, the failing check, *Open evidence* | staged, live (kane's own verdict) |
 | 12 | Assurance coverage | Row 3 `47% proven · 4 use cases`; the tab's bars, failing/blocked, last run, use-case cards | live (real requirement store) |
@@ -41,11 +41,11 @@ Two differences, both deliberate:
 
 | Rule | v2 |
 |---|---|
-| The mod watches; it never starts a test | It runs only `kane-cli cover gaps --json`, `kill -0`, `git check-ignore` and `git diff`; tests are run by Claude, through prompts the person's buttons send |
+| The mod watches; it never starts a test | It runs `kane-cli cover gaps --json`, `kill -0`, `ps`, `git check-ignore` and `git diff`, and on *View evidence* `kane-cli evidence serve` and `open`; tests are run by Claude, through prompts the person's buttons send |
 | Structured data only | Pointer JSON and `events.ndjson` lines; kane-cli's human output is never read |
 | No guesses on screen | What kane-cli does not report is left out (step totals, credits while running, balance, browser) |
 | Ignore what you do not know | `adapter.ts` dispatches on known types and skips the rest |
-| Every behaviour has a test; README changes with it | 79 tests; both READMEs describe v2 |
+| Every behaviour has a test; README changes with it | 127 tests; both READMEs describe v2 |
 | Code shape: sources → adapter → model → views | `sources.ts`, `adapter.ts` (only place raw field names appear), `model.ts` (pure), `register.tsx` |
 | Faults 1–5 in the prototype | All fixed: wrapped text keeps its column, waiting markers in the dim colour, card borders in the dim colour, cuts sized from the pane width, no background on band or pane |
 
@@ -64,7 +64,24 @@ Two differences, both deliberate:
 | A light terminal theme, a narrow terminal | A darker palette on light themes; every band row fits its width | test, live (80 columns) |
 | kane-cli is upgraded | The display keeps working; a newer wire format says so instead of breaking | test |
 
+## Added after the design
+
+Things the design did not ask for. Use-case detail, the card, the spinner and History were checked **live**: a real Claude Code session in a fullscreen terminal, a demo shop project with a real requirement store, and real kane-cli runs (`guide/run_tour_v3.sh` records it). Remote suites are checked by **test** only.
+
+| Addition | What it does |
+|---|---|
+| Remote suites | `kane-cli testrun run --remote`: the grid reports its tests only when the job ends, so until then the band reads `12 tests on the grid · sent 2m ago` and the pane gives the grid, the job and its link. A job that fails before any test reports gives every test that reason |
+| Use-case detail | Press a use case on the Assurance tab: its title and risk, what it owes to design and to run, kane-cli's reason and next command for each, and *Close these gaps with Claude* |
+| Card in the chat | A kane-cli test Claude runs is drawn in the conversation as a card in place of its shell row: one line while it runs, then the result, a failure's on/why/kind or a suite's counts, *View steps* and *View evidence*. *View evidence* opens the pack in kane-cli's viewer in one click, which is the one time the mod starts a kane-cli command other than `cover gaps`. Printed chats (terminal outside fullscreen) get the evidence path instead of buttons |
+| History tab | The last 30 finished runs in this project (it was 10, shown only as `last run …`), with when, how long, and where each failed or a suite's counts. `/kane history` opens it |
+| Spinner | A one-cell spinner leads the running step on the band and on the card's running line, stepping with the mascot |
+| Found live, and fixed | Saved tests that match a change equally are ordered by last result; a run started outside the chat is named from its process; the idle band counts each test by its latest result; use-case cards show their title; a reason shared by every row is said once |
+
 ## Not checked
+
+- **Remote suites in a live session.** The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
+- **View evidence opening the browser.** Live, the button started `kane-cli evidence serve` for the run's real pack and reported the evidence opened; the browser tab itself was not observed by the recording.
+- **The card outside a fullscreen terminal**: its evidence-path form is covered by a test only.
 
 - **The desktop app.** The band and pane are mounted on the desktop surface in tests (the mascot as an image there), but not opened in the app itself.
 - **The light palette in a live session**: switching a session's theme changes the person's global setting, so it is covered by a test only.

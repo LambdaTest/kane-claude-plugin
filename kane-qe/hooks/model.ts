@@ -3,7 +3,7 @@
 
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import type { Assurance, Check, HistoryEntry, Kind, Run, Status, Step, UseCase } from '../types'
+import type { Assurance, Check, HistoryEntry, Kind, Pending, Run, Status, Step, UseCase } from '../types'
 
 /** The design's palette, made for dark terminals. */
 const DARK = {
@@ -197,8 +197,22 @@ export function fold(run: Run, ev: Ev): Run {
       })
     case 'suiteDone': {
       const status: Status = ev.status === 'passed' ? 'passed' : 'failed'
-      const members = (run.members ?? []).map(m => (m.status === 'running' ? { ...m, status: 'failed' as const, endedAt: ev.at, failure: { why: 'the suite ended before this test finished' } } : m))
-      return { ...run, status, endedAt: ev.at, members }
+      // A grid job that failed before any test reported: every test shares the job's reason.
+      const lost = status === 'failed' && !!run.remote && !(run.members ?? []).some(m => m.status === 'passed' || m.status === 'failed')
+      const members = (run.members ?? []).map(m => {
+        if (m.status === 'running') return { ...m, status: 'failed' as const, endedAt: ev.at, failure: { why: 'the suite ended before this test finished' } }
+        if (lost && m.status === 'pending') return { ...m, status: 'failed' as const, startedAt: ev.at, endedAt: ev.at, failure: { why: run.failure?.why || 'the grid job ended with no result for this test' } }
+        return m
+      })
+      return { ...run, status, endedAt: ev.at, members, ...(ev.executionId ? { executionId: ev.executionId } : {}) }
+    }
+    case 'remote': {
+      const remote = { ...run.remote }
+      if (ev.backend) remote.backend = ev.backend
+      if (ev.jobId) remote.jobId = ev.jobId
+      if (ev.jobUrl) remote.jobUrl = ev.jobUrl
+      if (ev.dispatched) remote.dispatchedAt = ev.at
+      return { ...run, kind: 'testrun', remote }
     }
   }
 }
@@ -243,6 +257,16 @@ export function tally(list: readonly Run[]): Tally {
   return out
 }
 
+/** Each test by its latest result: a test that failed and then passed counts once, as passed. */
+export function latest(list: readonly Run[]): Run[] {
+  const newest = new Map<string, Run>()
+  for (const r of list) {
+    const seen = newest.get(r.label)
+    if (!seen || (r.endedAt ?? r.startedAt) >= (seen.endedAt ?? seen.startedAt)) newest.set(r.label, r)
+  }
+  return list.filter(r => newest.get(r.label) === r)
+}
+
 /** Seconds a run has taken, or has been going. */
 export const elapsed = (r: Run, now: number): number => ((r.endedAt ?? now) - r.startedAt) / 1000
 
@@ -263,13 +287,23 @@ export function nowText(r: Run): string {
   return 'starting the browser'
 }
 
+/** True while a suite's tests are on the remote grid and none has reported: the grid reports them when the job ends. */
+export function onGrid(r: Run): boolean {
+  if (!r.remote || !isLive(r.status)) return false
+  return !(r.members ?? []).some(m => m.status !== 'pending')
+}
+
+/** "sent 2m 05s ago", or that the job is still being sent. */
+export const gridSince = (r: Run, now: number): string => (r.remote?.dispatchedAt ? `sent ${fmt((now - r.remote.dispatchedAt) / 1000)} ago` : 'sending the job')
+
 // ── the band ────────────────────────────────────────────────────────────
 
 export type Span = { t: string; c?: string; bg?: string; b?: boolean; d?: boolean }
 /** One piece of a row; an array is drawn with no gap between its spans. */
 export type Item = Span | Span[]
 export type RowButton = { key: string; label: string; act: string }
-export type Row = { items: Item[]; button?: RowButton }
+/** `spin`: the row is what a running test is doing now, drawn behind a spinner. */
+export type Row = { items: Item[]; button?: RowButton; spin?: boolean }
 export type Band = { think: boolean; rows: [Row, Row, Row] }
 export type BandOptions = {
   assurance: Assurance
@@ -343,7 +377,7 @@ function nowRow(live: readonly Run[], now: number, room: number): Row {
     shown += 1
   }
   if (shown < live.length) items.push(dim(`· +${live.length - shown} more`))
-  return { items }
+  return { items, spin: live.length > 0 }
 }
 
 function failRow(r: Run, room: number): Row {
@@ -371,7 +405,7 @@ const itemWidth = (i: Item): number => (Array.isArray(i) ? i.reduce((n, s) => n 
 
 /** Cells a row takes as drawn: items one cell apart, a button as `[ label ]`. */
 export function rowWidth(r: Row): number {
-  const parts = r.items.map(itemWidth).concat(r.button ? [r.button.label.length + 4] : [])
+  const parts = (r.spin ? [1] : []).concat(r.items.map(itemWidth), r.button ? [r.button.label.length + 4] : [])
   return parts.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1)
 }
 
@@ -401,6 +435,17 @@ function pickBand(runs: readonly Run[], o: BandOptions): Band {
     const running = only.members.filter(m => m.status === 'running')
     const failed = newestFailed(only.members)
     const counts = c.total > 0 ? [{ t: `${c.passed + c.failed} of ${c.total} tests done`, b: true }, dim(`· ${c.running} running · ${c.pending} left`)] : [dim('planning')]
+    if (onGrid(only)) {
+      const tests = c.total > 0 ? [{ t: `${c.total} test${c.total === 1 ? '' : 's'} on the grid`, b: true }, dim(`· ${gridSince(only, o.now)}`)] : [dim(gridSince(only, o.now))]
+      return {
+        think,
+        rows: [
+          { items: [chip('suite', true), cells(only.members.map(m => m.status)), ...tests], button: open },
+          { items: [dim('grid'), { t: only.remote?.backend ?? 'remote' }, dim('· each test is reported when the job ends')] },
+          assuranceRow(o.assurance),
+        ],
+      }
+    }
     return {
       think,
       rows: [
@@ -418,7 +463,7 @@ function pickBand(runs: readonly Run[], o: BandOptions): Band {
       think,
       rows: [
         { items: [chip('running', true), { t: cut(nm(only), Math.max(12, room - 24)), b: true }, dim(fmt(elapsed(only, o.now)))], button: open },
-        { items: [only.waiting ? { t: cut(step, room), c: C.orange } : { t: cut(step, room) }] },
+        only.waiting ? { items: [{ t: cut(step, room), c: C.orange }] } : { items: [{ t: cut(step, room - 2) }], spin: true },
         assuranceRow(o.assurance),
       ],
     }
@@ -436,8 +481,8 @@ function pickBand(runs: readonly Run[], o: BandOptions): Band {
     }
   }
 
-  // idle: counts cover runs seen in this session
-  const all = leaves(runs)
+  // idle: counts cover the tests seen in this session, each by its latest result
+  const all = latest(leaves(runs))
   const c = tally(all)
   const first: Item[] = [chip('idle', false)]
   if (c.passed) first.push({ t: `✓ ${c.passed} passed`, c: C.mint })
@@ -485,7 +530,51 @@ export function kindLine(r: Run): string | undefined {
   return parts.length ? parts.join(' · ') : undefined
 }
 
+// ── the card in the chat ─────────────────────────────────────────────────
+
+/** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", or a suite's counts. Each part only if kane-cli reported it. */
+export function cardResult(r: Run, now: number): Span[] {
+  const time = fmt(elapsed(r, now))
+  if (r.kind === 'testrun' && r.members) {
+    const c = tally(r.members)
+    const out: Span[] = []
+    if (c.passed) out.push({ t: `${c.passed} passed`, c: C.mint })
+    if (c.failed) out.push({ t: `${c.failed} failed`, c: C.coral })
+    if (c.running) out.push({ t: `${c.running} running`, c: C.cyan })
+    if (c.pending && isLive(r.status)) out.push({ t: `${c.pending} left`, d: true })
+    out.push({ t: time, d: true })
+    return out
+  }
+  const out: Span[] = [{ t: r.status === 'passed' ? '✓ passed' : '✗ failed', c: tone(r.status), b: true }, { t: time, d: true }]
+  if (r.credits !== undefined) out.push({ t: `${Math.round(r.credits * 10) / 10} credits`, d: true })
+  return out
+}
+
+/** The header fitted to `room` cells: the name is cut first, then credits drop, then the time; the status stays. */
+export function cardHeader(r: Run, now: number, room: number): { name: string; result: Span[] } {
+  let result = cardResult(r, now)
+  const width = (list: Span[]) => list.reduce((n, s) => n + [...s.t].length + 3, 0)
+  const min = 12
+  while (result.length > 1 && width(result) + min + 8 > room) result = result.slice(0, -1)
+  return { name: cut(r.label, Math.max(min, room - width(result) - 8)), result }
+}
+
+/** The first line of a step's text: a designed test's step can run to a paragraph. */
+export const firstLine = (t: string): string => t.split('\n')[0]!.trim()
+
+/** A suite card's failures: three at most, then how many more. */
+export function cardFailures(r: Run): { rows: Run[]; more: number } {
+  const failed = (r.members ?? []).filter(m => m.status === 'failed').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+  return { rows: failed.slice(0, 3), more: Math.max(0, failed.length - 3) }
+}
+
+/** True when a shell command is a kane-cli test run: the only commands that get a card. */
+export const isRunCommand = (command: string): boolean => labelFromCommand(command) !== undefined
+
 // ── assurance ────────────────────────────────────────────────────────────
+
+/** The most a use case's detail lists; its counts still cover every row. */
+const MAX_PENDING = 20
 
 /** `kane-cli cover gaps --json` → what the band and the pane show. */
 export function parseCoverGaps(text: string): Assurance {
@@ -502,13 +591,21 @@ export function parseCoverGaps(text: string): Assurance {
   const started = Date.parse(String(proven?.latest_run?.started_at ?? ''))
   const useCases: UseCase[] = (Array.isArray(o.usecases) ? o.usecases : []).map((u: Record<string, any>) => {
     const pending: Record<string, any>[] = Array.isArray(u.pending) ? u.pending : []
+    const text = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined)
+    const owed: Pending[] = pending
+      .filter(p => p && (p.stage === 'design' || p.stage === 'cover'))
+      .slice(0, MAX_PENDING)
+      .map(p => ({ title: text(p.title) ?? text(p.id) ?? text(p.ref) ?? text(p.kind) ?? 'gap', why: text(p.why), risk: text(p.risk), stage: p.stage, command: text(p.ready_command) }))
     return {
       id: String(u.id ?? u.title ?? 'use case'),
+      title: text(u.id) ? text(u.title) : undefined,
+      risk: text(u.risk),
       designed: pct(u.design_completeness?.pct) ?? 0,
       proven: pct(u.proven?.pct),
       stale: typeof u.stale_acs === 'number' ? u.stale_acs : 0,
       toDesign: pending.filter(p => p.stage === 'design').length,
       toCover: pending.filter(p => p.stage === 'cover').length,
+      pending: owed,
     }
   })
   return {
@@ -530,6 +627,39 @@ export function debt(u: UseCase): Span[] {
   if (u.toCover) out.push({ t: `${u.toCover} to run`, c: C.dim })
   if (!out.length && u.proven === 100) out.push({ t: 'proven', c: C.mint })
   return out
+}
+
+/** What Claude is asked when the person wants a use case's gaps closed. */
+export function gapsPrompt(u: UseCase): string {
+  const first = u.pending.find(p => p.command)
+  const start = first?.command ? ` Start with \`${first.command}\` (${first.title}).` : ''
+  return `Close the assurance gaps of kane-cli use case ${u.id}: \`kane-cli cover gaps ${u.id}\` lists what it still owes.${start} Use --mode agent on kane-cli's design and maintain commands, and tell me what changed.`
+}
+
+// ── history ──────────────────────────────────────────────────────────────
+
+/** How many finished runs the mod keeps per project. */
+export const HISTORY_MAX = 30
+
+/** What the mod remembers of a finished run. */
+export function historyEntry(r: Run): HistoryEntry | undefined {
+  if (r.status !== 'passed' && r.status !== 'failed') return undefined
+  const at = r.endedAt ?? r.startedAt
+  const e: HistoryEntry = { label: r.label, status: r.status, at, kind: r.kind, seconds: Math.max(0, Math.round((at - r.startedAt) / 1000)) }
+  if (r.failure?.where) e.where = r.failure.where
+  if (r.kind === 'testrun' && r.members) {
+    const c = tally(r.members)
+    e.tests = { passed: c.passed, failed: c.failed }
+  }
+  return e
+}
+
+/** A history row's second line: a suite's counts, where a run failed, or that it passed. */
+export function historyDetail(h: HistoryEntry): string {
+  const took = h.seconds ? ` · ${fmt(h.seconds)}` : ''
+  if (h.tests) return `${h.tests.passed} passed · ${h.tests.failed} failed${took}`
+  if (h.status === 'failed') return `${h.where ? `failed on ${h.where}` : 'failed'}${took}`
+  return `passed${took}`
 }
 
 // ── what Claude ran ──────────────────────────────────────────────────────
@@ -574,8 +704,9 @@ export function featureWords(path: string): string[] {
   return [...new Set(words)]
 }
 
-/** Saved tests that mention a changed file's feature, best match first. */
-export function savedTestsFor(changed: readonly string[], saved: readonly { name: string; text: string }[]): string[] {
+/** Saved tests that mention a changed file's feature, best match first. Equal matches: one that last failed, then the
+ *  one run most recently, then by name. */
+export function savedTestsFor(changed: readonly string[], saved: readonly { name: string; text: string }[], last: Readonly<Record<string, Pick<HistoryEntry, 'status' | 'at'>>> = {}): string[] {
   const words = [...new Set(changed.flatMap(featureWords))]
   if (!words.length) return []
   return saved
@@ -587,7 +718,14 @@ export function savedTestsFor(changed: readonly string[], saved: readonly { name
       return { name: t.name, hits }
     })
     .filter(t => t.hits > 0)
-    .sort((a, b) => b.hits - a.hits)
+    .sort((a, b) => {
+      if (b.hits !== a.hits) return b.hits - a.hits
+      const [x, y] = [last[a.name], last[b.name]]
+      const failed = Number(y?.status === 'failed') - Number(x?.status === 'failed')
+      if (failed) return failed
+      if ((y?.at ?? 0) !== (x?.at ?? 0)) return (y?.at ?? 0) - (x?.at ?? 0)
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    })
     .map(t => t.name)
 }
 
