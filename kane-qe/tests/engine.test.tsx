@@ -755,28 +755,44 @@ describe('the card in the chat', () => {
     }
   })
 
-  test('a folded group of shell calls is unfolded only when it holds a kane-cli run', async ($, on) => {
-    const w = world(on)
-    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
-    const group = (commands: string[]) => ({
+  test('a folded group of shell calls stays folded; a run it holds is drawn as a card beneath its line', async ($, on) => {
+    const w = world(on, { viewer: 'https://viewer.example/?pack=p' })
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    fail(w, dir)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const group = (calls: { id: string; command: string }[], isExpanded = false) => ({
       plugin: 'kane-qe',
       component: 'ToolGroup',
       requestId: 'g1',
       surface: 'terminal',
-      props: { calls: commands.map((command, i) => ({ tool_use_id: `t${i}`, tool: 'Bash', input: { command }, isRunning: false, isErrored: false })), isActive: false, isExpanded: false },
+      ...FULL,
+      props: { calls: calls.map(c => ({ tool_use_id: c.id, tool: 'Bash', input: { command: c.command }, isRunning: false, isErrored: false })), isActive: false, isExpanded },
     })
     const cases = [
-      { commands: ['ls', 'git status'], want: false },
-      { commands: ['kane-cli whoami'], want: false },
-      { commands: ['ls', CMD], want: true },
-      { commands: ['kane-cli run "Search for iPod" --agent'], want: true },
+      { name: 'no kane-cli run', calls: [{ id: 't0', command: 'ls' }, { id: 't1', command: 'git status' }], card: false },
+      { name: 'a kane-cli command that is no run', calls: [{ id: 't0', command: 'kane-cli whoami' }], card: false },
+      { name: 'a run command no run came of', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_none', command: CMD }], card: false },
+      { name: 'a run among other calls', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }, { id: 't2', command: 'pwd' }], card: true },
+      { name: 'a group the person unfolded: its rows draw the card', calls: [{ id: 'toolu_1', command: CMD }], expanded: true, card: false },
     ]
     for (const c of cases) {
       w.rows.length = 0
-      const g = await $.ui.mount(group(c.commands) as never)
-      expect(w.rows.find(r => r.component === 'ToolGroup')?.isExpanded).toBe(c.want)
+      const g = await $.ui.mount(group(c.calls, c.expanded) as never)
+      // The mod never unfolds the group: the engine's own line is drawn as it came.
+      expect(w.rows.find(r => r.component === 'ToolGroup')?.isExpanded, c.name).toBe(c.expanded ?? false)
+      expect(await g.find({ type: 'Text', text: /^engine ToolGroup$/ }), c.name).toBeDefined()
+      expect((await g.find({ type: 'Text', text: /^✗ failed$/ })) !== undefined, c.name).toBe(c.card)
+      expect((await g.find({ key: 'card-evidence' })) !== undefined, c.name).toBe(c.card)
       await g.unmount()
     }
+    const g = await $.ui.mount(group([{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }]) as never)
+    await g.press({ key: 'card-evidence' })
+    await w.clock.settle()
+    expect(w.ran.some(a => a.join(' ') === `kane-cli evidence serve ${dir}/evidence/8f0e.evidence`)).toBe(true)
+    await g.unmount()
   })
 
   test('a suite’s card counts its tests and names its failures; its pack is the one its execution id names', async ($, on) => {

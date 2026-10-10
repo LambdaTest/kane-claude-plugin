@@ -1046,6 +1046,19 @@ function paint($: EngineInterface) {
   for (const requestId of spinSites) void $.ui.blit({ requestId, key: 'spin', cells: spin }).catch(() => spinSites.delete(requestId))
 }
 
+const commandOf = (input: unknown): string => String((input as { command?: unknown } | undefined)?.command ?? '')
+
+/** A run's card at a chat site: a shell row, or beneath a folded group of them. */
+async function chatCardAt($: EngineInterface, e: { requestId: string; surface: RenderSurface; viewport?: { columns: number; isFullscreen?: boolean } }, r: Run) {
+  await read($, tickAtom)
+  const press: Press = a => void act($, a).catch(() => undefined)
+  // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
+  const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
+  if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
+  else spinSites.delete(e.requestId)
+  return chatCard($.ui.resolve(e as never), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
+}
+
 // ── the mod ──────────────────────────────────────────────────────────────
 
 export const register: Register = (on, options) => {
@@ -1116,24 +1129,31 @@ export const register: Register = (on, options) => {
   })
 
   // A kane-cli run Claude started is drawn as a card in the chat, in place of its shell row.
-  // The chat folds shell calls into one count line: a group holding a run is unfolded, so its row is drawn.
+  // The chat folds shell calls into one count line: the group stays folded, and each run it holds is drawn as a card beneath that line.
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
-    if (e.props.isExpanded || !e.props.calls.some(c => c.tool === 'Bash' && isRunCommand(String((c.input as { command?: unknown } | undefined)?.command ?? '')))) return next(e)
-    return next({ ...e, props: { ...e.props, isExpanded: true } })
+    if (e.props.isExpanded) return next(e)
+    const ids = e.props.calls.filter(c => c.tool === 'Bash' && isRunCommand(commandOf(c.input))).map(c => c.tool_use_id)
+    const held = ids.length ? (await read($, runsAtom)).filter(r => r.toolUseId !== undefined && ids.includes(r.toolUseId)) : []
+    if (!held.length) return next(e)
+    const ui: Kit = $.ui.resolve(e)
+    const line = await next(e)
+    const cards = await Promise.all(held.map(r => chatCardAt($, e, r)))
+    return (
+      <ui.Box flexDirection="column">
+        {line}
+        {cards.map((c, i) => (
+          <ui.Box key={`group-card-${held[i]!.id}`}>{c}</ui.Box>
+        ))}
+      </ui.Box>
+    )
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (e.props.tool !== 'Bash' || !isRunCommand(String((e.props.input as { command?: unknown } | undefined)?.command ?? ''))) return next(e)
+    if (e.props.tool !== 'Bash' || !isRunCommand(commandOf(e.props.input))) return next(e)
     const r = (await read($, runsAtom)).find(x => x.toolUseId === e.props.tool_use_id)
     // No run came of the command (kane-cli refused or failed to start): its own row says why.
     if (!r) return next(e)
-    await read($, tickAtom)
-    const press: Press = a => void act($, a).catch(() => undefined)
-    // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
-    const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
-    if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
-    else spinSites.delete(e.requestId)
-    return chatCard($.ui.resolve(e), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
+    return chatCardAt($, e, r)
   })
 
   // The card stands for the whole call: once the run has a result, kane-cli's raw output is not drawn beneath it.
