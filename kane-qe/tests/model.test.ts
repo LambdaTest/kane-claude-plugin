@@ -5,7 +5,9 @@ import type { Ev } from '../hooks/adapter'
 import {
   band,
   latest,
+  allPassed,
   cardFailures,
+  cardFooter,
   cardHeader,
   cardResult,
   isRunCommand,
@@ -227,6 +229,7 @@ describe('the card in the chat', () => {
     { name: 'a passed run: status, time, credits', run: run('a', 'run', [label('login_test.md'), step(1, 'done', 'Sign in', 3), passed(41)]), want: ['✓ passed', '41s', '12.4 credits'] },
     { name: 'a failed run with no credits reported shows none', run: run('b', 'run', [label('x'), step(1, 'failed', 'Open', 3), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), want: ['✗ failed', '1m 06s'] },
     { name: 'a finished suite: its counts and time', run: fold(suite(['passed', 'passed', 'failed']), { k: 'suiteDone', status: 'failed', at: T0 + 90_000 }), want: ['2 passed', '1 failed', '1m 30s'] },
+    { name: 'a finished suite with no failure says so in one mark', run: fold(suite(['passed', 'passed', 'passed']), { k: 'suiteDone', status: 'passed', at: T0 + 90_000 }), want: ['✓ all 3 passed', '1m 30s'] },
     { name: 'a suite still going says what is left', run: suite(['passed', 'running', 'pending']), want: ['1 passed', '1 running', '1 left', '1m 10s'] },
   ]
   for (const c of cases) test(c.name, () => expect(texts(c.run)).toEqual(c.want))
@@ -241,6 +244,21 @@ describe('the card in the chat', () => {
     expect(mid.result[0]!.t).toBe('✓ passed')
     const narrow = cardHeader(r, T0 + 50_000, 30)
     expect(narrow.result.map(s => s.t)).toEqual(['✓ passed'])
+  })
+
+  test('a finished card closes with who verified it, ticked only when everything passed', () => {
+    const done = (list: Parameters<typeof suite>[0], status: 'passed' | 'failed') => fold(suite(list), { k: 'suiteDone', status, at: T0 + 90_000 })
+    const cases: { name: string; run: Run; all: boolean; want: string[] }[] = [
+      { name: 'a passed run', run: run('a', 'run', [label('x'), step(1, 'done', 'Sign in', 3), passed(41)]), all: true, want: ['✓', 'Verified with KaneAI'] },
+      { name: 'a failed run', run: run('b', 'run', [label('x'), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), all: false, want: ['Verified with KaneAI'] },
+      { name: 'a suite with every test passed', run: done(['passed', 'passed'], 'passed'), all: true, want: ['✓', 'Verified with KaneAI'] },
+      { name: 'a suite with one failure', run: done(['passed', 'failed'], 'failed'), all: false, want: ['Verified with KaneAI'] },
+      { name: 'a suite that ended with tests unstarted', run: done(['passed', 'pending'], 'failed'), all: false, want: ['Verified with KaneAI'] },
+    ]
+    for (const c of cases) {
+      expect(allPassed(c.run), c.name).toBe(c.all)
+      expect(cardFooter(c.run).map(s => s.t), c.name).toEqual(c.want)
+    }
   })
 
   test('a suite’s card names three failures at most, newest first, then how many more', () => {

@@ -651,6 +651,9 @@ describe('the card in the chat', () => {
       expect(await card.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       expect(await card.find({ key: 'card-steps' })).toBeDefined()
       expect(await card.find({ key: 'card-evidence' })).toBeDefined()
+      // The card closes with who verified it; the tick is kept for a run with nothing failed.
+      expect(await card.find({ type: 'Text', text: /^Verified with KaneAI$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^✓$/ })).toBeUndefined()
       await card.unmount()
     }
     // The card stands for the call: its raw output is gone.
@@ -679,6 +682,25 @@ describe('the card in the chat', () => {
     expect(await pane.find({ type: 'Text', text: /^where$/ })).toBeDefined()
     await pane.unmount()
     await card.unmount()
+  })
+
+  test('a passed run’s card is ticked in its result and in its closing line', async ($, on) => {
+    const w = world(on)
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    w.files[`${dir}/events.ndjson`] +=
+      line({ type: 'test_md_step_end', step_index: 1, status: 'passed', duration_s: 20 }, 22) + line({ type: 'run_end', status: 'passed' }, 22) + line({ type: 'test_md_done', overall_status: 'passed', duration_s: 22 }, 22)
+    endRun(w, 71)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    for (const full of [true, false]) {
+      const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, { viewport: { columns: 100, rows: 40, isFullscreen: full } }), surface: 'terminal' } as never)
+      expect(await card.find({ type: 'Text', text: /^✓ passed$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^✓$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^Verified with KaneAI$/ })).toBeDefined()
+      await card.unmount()
+    }
   })
 
   test('where the chat is printed text, the card ends with the evidence path, not buttons', async ($, on) => {

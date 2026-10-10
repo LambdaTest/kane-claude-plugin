@@ -14,7 +14,9 @@ import {
   ORDER,
   band,
   bar,
+  allPassed,
   cardFailures,
+  cardFooter,
   cardHeader,
   currentStep,
   cells,
@@ -530,7 +532,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
   const kind = kindLine(r)
   const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
   return (
-    <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.mint} paddingX={1}>
+    <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={allPassed(r) ? C.mint : C.coral} paddingX={1}>
       {mascot(table, surface, false, 0)}
       <ui.Box flexDirection="column" flexGrow={1} flexShrink={1}>
         <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
@@ -569,6 +571,9 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
         ) : r.evidence ? (
           fact(ui, 'evidence', r.evidence)
         ) : null}
+        <ui.Box key="card-verified" flexDirection="row" gap={1} marginTop={clickable || r.evidence ? 1 : 0}>
+          {cardFooter(r).map(s => text(ui, s))}
+        </ui.Box>
       </ui.Box>
     </ui.Box>
   )

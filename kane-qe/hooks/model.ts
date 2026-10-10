@@ -532,11 +532,24 @@ export function kindLine(r: Run): string | undefined {
 
 // ── the card in the chat ─────────────────────────────────────────────────
 
-/** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", or a suite's counts. Each part only if kane-cli reported it. */
+/** True when a finished run has nothing but passes: the run itself, or every test of a suite. */
+export function allPassed(r: Run): boolean {
+  if (r.kind === 'testrun' && r.members) return !isLive(r.status) && r.members.length > 0 && r.members.every(m => m.status === 'passed')
+  return r.status === 'passed'
+}
+
+/** The line that closes a finished card: who ran the check, with a tick when everything passed. */
+export function cardFooter(r: Run): Span[] {
+  const by = 'Verified with KaneAI'
+  return allPassed(r) ? [{ t: '✓', c: C.mint, b: true }, { t: by, c: C.mint }] : [{ t: by, d: true }]
+}
+
+/** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", a suite's counts, or "✓ all 3 passed" when none failed. Each part only if kane-cli reported it. */
 export function cardResult(r: Run, now: number): Span[] {
   const time = fmt(elapsed(r, now))
   if (r.kind === 'testrun' && r.members) {
     const c = tally(r.members)
+    if (allPassed(r)) return [{ t: c.total === 1 ? '✓ passed' : `✓ all ${c.total} passed`, c: C.mint, b: true }, { t: time, d: true }]
     const out: Span[] = []
     if (c.passed) out.push({ t: `${c.passed} passed`, c: C.mint })
     if (c.failed) out.push({ t: `${c.failed} failed`, c: C.coral })
