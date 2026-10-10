@@ -74,7 +74,7 @@ Things the design did not ask for. Use-case detail, the card, the spinner and Hi
 | Use-case detail | Press a use case on the Assurance tab: its title and risk, what it owes to design and to run, kane-cli's reason and next command for each, and *Close these gaps with Claude* |
 | Card in the chat | A kane-cli test Claude runs is drawn in the conversation as a card in place of its shell row: one line while it runs, then the result, a failure's on/why/kind or a suite's counts (`✓ all 3 passed` when none failed), *View steps* and *View evidence*, and a closing *Verified with KaneAI* line that is green and ticked only when everything passed. *View evidence* opens the pack in kane-cli's viewer in one click, which is the one time the mod starts a kane-cli command other than `cover gaps`. Printed chats (terminal outside fullscreen) get the evidence path instead of buttons |
 | History tab | The last 30 finished runs in this project (it was 10, shown only as `last run …`), with when, how long, and where each failed or a suite's counts. `/kane history` opens it |
-| Spinner | A one-cell spinner leads the running step on the band and on the card's running line, stepping with the mascot |
+| Spinner | A one-cell breathing dot (`∙ • ● ◉`, swelling and shrinking) leads the running step on the band and on the card's running line, stepping with the mascot |
 | Found live, and fixed | Saved tests that match a change equally are ordered by last result; a run started outside the chat is named from its process; the idle band counts each test by its latest result; use-case cards show their title; a reason shared by every row is said once |
 
 ## Not checked

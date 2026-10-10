@@ -116,8 +116,8 @@ function pack(words: readonly number[]): string {
   return base64(bytes)
 }
 
-/** The spinner drawn before a step while its test runs: one cell, stepping with the mascot. */
-const SPIN = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
+/** The spinner drawn before a step while its test runs: one cell, a dot that swells and shrinks, stepping with the mascot. */
+const SPIN = [...'∙∙•●◉◉●•']
 export const spinnerGlyph = (n: number): string => SPIN[((n % SPIN.length) + SPIN.length) % SPIN.length]!
 /** That spinner as a one-cell terminal Raster, in `color` (`#rrggbb`). */
 export function spinnerCells(n: number, color: string): string {
