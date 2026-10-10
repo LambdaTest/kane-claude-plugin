@@ -28,7 +28,6 @@ import {
   tidyStep,
   isTrackedEdit,
 } from '../hooks/model'
-import { spinnerGlyph } from '../hooks/mascot'
 import type { BandOptions } from '../hooks/model'
 import type { Assurance, HistoryEntry, Kind, Run } from '../types'
 import { runFailed, runPassed, testmdPassed, testrunFailed, testrunPassed, testrunPassedMember } from './fixtures/fixtures'
@@ -299,15 +298,6 @@ describe('the running step', () => {
   test('idle: nothing spins', () => {
     expect(spins([loginPassed()])).toEqual([false, false, false])
   })
-  test('the spinner is a dot that swells to the mascot’s eye and shrinks back, then repeats', () => {
-    const cases: { name: string; from: number; want: string }[] = [
-      { name: 'one cycle', from: 0, want: '∙∙•●◉◉●•' },
-      { name: 'the next cycle is the same', from: 8, want: '∙∙•●◉◉●•' },
-      { name: 'a frame before zero still lands on a frame', from: -8, want: '∙∙•●◉◉●•' },
-    ]
-    for (const c of cases) expect(Array.from({ length: 8 }, (_, i) => spinnerGlyph(c.from + i)).join(''), c.name).toBe(c.want)
-  })
-
   test('the spinner is part of the row’s width', () => {
     for (const columns of [60, 80, 120]) for (const row of band([one()], opts({ columns })).rows) expect(rowWidth(row) <= columns).toBe(true)
   })

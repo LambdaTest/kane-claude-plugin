@@ -624,10 +624,10 @@ describe('the card in the chat', () => {
       const live = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface } as never)
       // A spinner leads the line: a cell repainted in place on a terminal, a glyph elsewhere.
       if (surface === 'terminal') expect(await live.find({ type: 'Raster', key: 'spin' })).toBeDefined()
-      else expect(await live.find({ type: 'Text', text: /^[∙•●◉]$/ })).toBeDefined()
+      else expect(await live.find({ type: 'Text', text: /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/ })).toBeDefined()
       const band = await $.ui.mount({ ...BAND, surface } as never)
       if (surface === 'terminal') expect(await band.find({ type: 'Raster', key: 'spin' })).toBeDefined()
-      else expect(await band.find({ type: 'Text', text: /^[∙•●◉]$/ })).toBeDefined()
+      else expect(await band.find({ type: 'Text', text: /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/ })).toBeDefined()
       await band.unmount()
       expect(await live.find({ type: 'Text', text: /^checkout_guest$/ })).toBeDefined()
       expect(await live.find({ type: 'Text', text: /Fill the shipping address/ })).toBeDefined()
