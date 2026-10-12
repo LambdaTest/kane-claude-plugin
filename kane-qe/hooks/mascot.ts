@@ -116,6 +116,42 @@ function pack(words: readonly number[]): string {
   return base64(bytes)
 }
 
+/** The tick a passed card draws in the mascot's place: its pixels in the order the stroke lays them, two to a step. */
+const TICK: readonly (readonly [number, number])[] = [[0, 2], [1, 2], [1, 3], [2, 3], [2, 4], [3, 4], [3, 3], [4, 3], [4, 2], [5, 2], [5, 1], [6, 1], [6, 0], [7, 0]]
+const TICK_STEPS = TICK.length / 2
+/** After the stroke is whole it flashes for two steps, then holds. */
+const TICK_FLASH = 2
+const TICK_HOLD = 8
+/** How many steps the tick plays for; after them the mascot is back. */
+export const CHEER_STEPS = TICK_STEPS + TICK_FLASH + TICK_HOLD
+
+/** Step `n` of the tick as pixel rows: `m` where the stroke has reached, `M` while it flashes. */
+export function cheerFrame(n: number): Frame {
+  const drawn = Math.min(TICK.length, (Math.max(0, n) + 1) * 2)
+  const key = n >= TICK_STEPS && n < TICK_STEPS + TICK_FLASH ? 'M' : 'm'
+  const rows = Array.from({ length: MASCOT.height }, () => Array.from({ length: MASCOT.width }, () => '.'))
+  for (const [x, y] of TICK.slice(0, drawn)) rows[y]![x] = key
+  return rows.map(r => r.join(''))
+}
+
+/** That step as a terminal Raster's cells, the mascot's size: the stroke in `color`, its flash in `bright` (`#rrggbb`). */
+export function cheerCells(n: number, color: string, bright: string): string {
+  const ink = (k: string | undefined) => (k === 'm' ? Number.parseInt(color.slice(1), 16) : k === 'M' ? Number.parseInt(bright.slice(1), 16) : undefined)
+  const frame = cheerFrame(n)
+  const words: number[] = []
+  for (let y = 0; y < MASCOT.height; y += 2) {
+    for (let x = 0; x < MASCOT.width; x++) {
+      const top = ink(frame[y]?.[x])
+      const bottom = ink(frame[y + 1]?.[x])
+      if (top !== undefined && bottom !== undefined) words.push(UPPER, top, bottom)
+      else if (top !== undefined) words.push(UPPER, top, DEFAULT)
+      else if (bottom !== undefined) words.push(LOWER, bottom, DEFAULT)
+      else words.push(SPACE, DEFAULT, DEFAULT)
+    }
+  }
+  return pack(words)
+}
+
 /** The spinner drawn before a step while its test runs: one cell, stepping with the mascot. */
 const SPIN = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
 export const spinnerGlyph = (n: number): string => SPIN[((n % SPIN.length) + SPIN.length) % SPIN.length]!

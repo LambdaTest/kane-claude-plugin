@@ -28,6 +28,7 @@ import {
   tidyStep,
   isTrackedEdit,
 } from '../hooks/model'
+import { CHEER_STEPS, cheerFrame } from '../hooks/mascot'
 import type { BandOptions } from '../hooks/model'
 import type { Assurance, HistoryEntry, Kind, Run } from '../types'
 import { runFailed, runPassed, testmdPassed, testrunFailed, testrunPassed, testrunPassedMember } from './fixtures/fixtures'
@@ -261,6 +262,20 @@ describe('the card in the chat', () => {
       // A filled chip, so it reads as a badge and not as one more line of text.
       expect(cardFooter().every(s => s.bg !== undefined && s.b === true), c.name).toBe(true)
     }
+  })
+
+  test('the tick is drawn stroke by stroke, flashes when whole, then holds', () => {
+    const count = (n: number, key: string) => cheerFrame(n).join('').split(key).length - 1
+    const cases: { name: string; n: number; m: number; M: number }[] = [
+      { name: 'the first step', n: 0, m: 2, M: 0 },
+      { name: 'midway', n: 3, m: 8, M: 0 },
+      { name: 'the last stroke step', n: 6, m: 14, M: 0 },
+      { name: 'the flash', n: 7, m: 0, M: 14 },
+      { name: 'the hold', n: 9, m: 14, M: 0 },
+      { name: 'the last step', n: CHEER_STEPS - 1, m: 14, M: 0 },
+    ]
+    for (const c of cases) expect([count(c.n, 'm'), count(c.n, 'M')], c.name).toEqual([c.m, c.M])
+    expect(cheerFrame(CHEER_STEPS - 1)).toEqual(['......mm', '.....mm.', 'mm..mm..', '.mmmm...', '..mm....', '........'])
   })
 
   test('a suite’s card names three failures at most, newest first, then how many more', () => {

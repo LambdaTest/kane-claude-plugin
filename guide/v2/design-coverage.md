@@ -82,6 +82,7 @@ Things the design did not ask for. Use-case detail, the card, the spinner and Hi
 - **Remote suites in a live session.** The remote events are written from kane-cli's contract (`docs/remote-execution.md`); no real grid job has been watched with them.
 - **View evidence opening the browser.** Live, the button started `kane-cli evidence serve` for the run's real pack and reported the evidence opened; the browser tab itself was not observed by the recording.
 - **The card's closing line and the all-passed mark**: covered by tests only.
+- **The tick a passed card draws**: covered by tests only; not drawn on the desktop app, where the mascot is a picture.
 - **The card beneath a folded group of shell calls**: seen live with a stand-in card (the group stays one line, the card draws under it, its button takes a click); with a real kane-cli run it is covered by a test only.
 - **The card outside a fullscreen terminal**: its evidence-path form is covered by a test only.
 
