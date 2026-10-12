@@ -124,6 +124,23 @@ export function spinnerCells(n: number, color: string): string {
   return pack([spinnerGlyph(n).codePointAt(0)!, Number.parseInt(color.slice(1), 16), DEFAULT])
 }
 
+export const SHIELD = { columns: 3, rows: 2 } as const
+const hex = (color: string): number => Number.parseInt(color.slice(1), 16)
+/** A shield with a tick on it as a terminal Raster's cells: a full top row, a tapered row beneath. `color` and `ink` are `#rrggbb`. */
+export function shieldCells(color: string, ink: string): string {
+  const c = hex(color)
+  const block = (glyph: string) => [glyph.codePointAt(0)!, c, DEFAULT]
+  return pack([...block('█'), '✓'.codePointAt(0)!, hex(ink), c, ...block('█'), ...block('▝'), ...block('█'), ...block('▘')])
+}
+/** The same shield as a picture, for surfaces that draw no Raster. */
+export function shieldSvg(color: string, ink: string): string {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="22" viewBox="0 0 18 22">` +
+    `<path d="M1 1h16v9c0 6-4 9-8 11-4-2-8-5-8-11z" fill="${color}"/>` +
+    `<path d="M5 10l3 3 5-6" fill="none" stroke="${ink}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  )
+}
+
 export const RASTER = { columns: MASCOT.width, rows: MASCOT.height / 2 } as const
 
 export const PICTURE = { width: 50, height: 44 } as const

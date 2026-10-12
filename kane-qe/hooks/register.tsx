@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
+import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, shieldCells, shieldSvg, spinnerCells, spinnerGlyph, SHIELD } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -16,8 +16,8 @@ import {
   bar,
   allPassed,
   cardFailures,
-  cardFooter,
   cardHeader,
+  VERIFIED,
   currentStep,
   cells,
   cut,
@@ -501,6 +501,28 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: str
   )
 }
 
+/** The mark that closes a finished card: a shield, two rows tall, beside who verified the run. */
+function verified(table: Table, surface: RenderSurface) {
+  const ui: Kit = table
+  const shield =
+    surface === 'terminal' && 'Raster' in table ? (
+      <table.Raster key="shield" columns={SHIELD.columns} rows={SHIELD.rows} cells={shieldCells(C.purple, C.chipIdle)} />
+    ) : 'Svg' in table ? (
+      <table.Svg source={shieldSvg(C.purple, C.chipIdle)} alt="shield" width={18} height={22} />
+    ) : null
+  return (
+    <ui.Box key="card-verified" flexDirection="row" gap={1} flexShrink={0}>
+      {shield}
+      <ui.Box flexDirection="column">
+        <ui.Text dimColor>{VERIFIED[0]}</ui.Text>
+        <ui.Text color={C.purple} bold>
+          {VERIFIED[1]}
+        </ui.Text>
+      </ui.Box>
+    </ui.Box>
+  )
+}
+
 /** A run Claude started, as a card in the chat in place of its shell row: one line while it runs, then its result. */
 function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean) {
   const ui: Kit = table
@@ -531,6 +553,27 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
   const failures = isSuite ? cardFailures(r) : undefined
   const kind = kindLine(r)
   const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
+  const lines = [
+    isSuite ? item(ui, cells((r.members ?? []).map(m => m.status))) : null,
+    ...(failures?.rows.map(m => (
+          <ui.Box key={`card-fail-${m.id}`} flexDirection="row" gap={1}>
+            <ui.Text color={C.coral}>{`✗ ${cut(nm(m), 24)}`}</ui.Text>
+            <ui.Text dimColor>{m.failure?.where ? 'failed on' : 'failed'}</ui.Text>
+            <ui.Box flexShrink={1}>
+              <ui.Text>{cut(m.failure?.where ?? m.failure?.why ?? '', Math.max(10, inner - 38))}</ui.Text>
+            </ui.Box>
+          </ui.Box>
+        )) ?? []),
+    failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null,
+    !isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', cut(firstLine(r.failure.where), Math.max(20, inner * 2 - 8))) : null,
+    !isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null,
+    !isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null,
+    !isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null,
+    !clickable && r.evidence ? fact(ui, 'evidence', r.evidence) : null,
+  ].filter(Boolean)
+  // The badge stands two rows tall beside the card's last line and its buttons.
+  const upper = lines.slice(0, -1)
+  const last = lines[lines.length - 1]
   return (
     <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={allPassed(r) ? C.mint : C.coral} paddingX={1}>
       {mascot(table, surface, false, 0)}
@@ -547,30 +590,16 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
             {head.result.map((s, i) => (i === 0 ? text(ui, s) : <ui.Box flexDirection="row" gap={1}>{[<ui.Text dimColor>·</ui.Text>, text(ui, s)]}</ui.Box>))}
           </ui.Box>
         </ui.Box>
-        {isSuite ? item(ui, cells((r.members ?? []).map(m => m.status))) : null}
-        {failures?.rows.map(m => (
-          <ui.Box key={`card-fail-${m.id}`} flexDirection="row" gap={1}>
-            <ui.Text color={C.coral}>{`✗ ${cut(nm(m), 24)}`}</ui.Text>
-            <ui.Text dimColor>{m.failure?.where ? 'failed on' : 'failed'}</ui.Text>
-            <ui.Box flexShrink={1}>
-              <ui.Text>{cut(m.failure?.where ?? m.failure?.why ?? '', Math.max(10, inner - 38))}</ui.Text>
+        {upper}
+        <ui.Box flexDirection="row" justifyContent="space-between" alignItems="flex-end" gap={2}>
+          <ui.Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            {last ?? null}
+            <ui.Box flexDirection="row" gap={1}>
+              {clickable && (isSuite || r.status === 'failed') ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
+              {clickable && r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
             </ui.Box>
           </ui.Box>
-        ))}
-        {failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null}
-        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', cut(firstLine(r.failure.where), Math.max(20, inner * 2 - 8))) : null}
-        {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
-        {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
-        {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
-        {!clickable && r.evidence ? fact(ui, 'evidence', r.evidence) : null}
-        <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
-          <ui.Box flexDirection="row" gap={1}>
-            {clickable && (isSuite || r.status === 'failed') ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
-            {clickable && r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
-          </ui.Box>
-          <ui.Box key="card-verified" flexDirection="row" gap={1} flexShrink={0}>
-            {cardFooter().map(s => text(ui, s))}
-          </ui.Box>
+          {verified(table, surface)}
         </ui.Box>
       </ui.Box>
     </ui.Box>

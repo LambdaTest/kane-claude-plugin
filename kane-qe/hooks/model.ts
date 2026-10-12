@@ -538,10 +538,8 @@ export function allPassed(r: Run): boolean {
   return r.status === 'passed'
 }
 
-/** The badge that closes a finished card: who ran the check, as a solid chip in kane's colour behind a shield. */
-export function cardFooter(): Span[] {
-  return [{ t: ' ⛨ Verified with KaneAI ', bg: C.purple, c: C.chipIdle, b: true }]
-}
+/** The words beside a finished card's shield, one per row. */
+export const VERIFIED = ['Verified with', 'KaneAI'] as const
 
 /** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", a suite's counts, or "✓ all 3 passed" when none failed. Each part only if kane-cli reported it. */
 export function cardResult(r: Run, now: number): Span[] {
