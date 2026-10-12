@@ -562,17 +562,15 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
         {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
         {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
         {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
-        {clickable ? <ui.Text> </ui.Text> : null}
-        {clickable ? (
+        {!clickable && r.evidence ? fact(ui, 'evidence', r.evidence) : null}
+        <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
           <ui.Box flexDirection="row" gap={1}>
-            {isSuite || r.status === 'failed' ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
-            {r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+            {clickable && (isSuite || r.status === 'failed') ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
+            {clickable && r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
           </ui.Box>
-        ) : r.evidence ? (
-          fact(ui, 'evidence', r.evidence)
-        ) : null}
-        <ui.Box key="card-verified" flexDirection="row" gap={1} marginTop={clickable || r.evidence ? 1 : 0}>
-          {cardFooter(r).map(s => text(ui, s))}
+          <ui.Box key="card-verified" flexDirection="row" gap={1} flexShrink={0}>
+            {cardFooter(r).map(s => text(ui, s))}
+          </ui.Box>
         </ui.Box>
       </ui.Box>
     </ui.Box>
