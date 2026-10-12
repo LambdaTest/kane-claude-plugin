@@ -569,7 +569,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
             {clickable && r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
           </ui.Box>
           <ui.Box key="card-verified" flexDirection="row" gap={1} flexShrink={0}>
-            {cardFooter(r).map(s => text(ui, s))}
+            {cardFooter().map(s => text(ui, s))}
           </ui.Box>
         </ui.Box>
       </ui.Box>
