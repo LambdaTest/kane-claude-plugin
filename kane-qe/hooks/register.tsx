@@ -529,7 +529,6 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
   const head = cardHeader(r, now, inner)
   const isSuite = r.kind === 'testrun' && !!r.members
   const failures = isSuite ? cardFailures(r) : undefined
-  const kind = kindLine(r)
   const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
   return (
     <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={allPassed(r) ? C.mint : C.coral} paddingX={1}>
@@ -558,9 +557,24 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
           </ui.Box>
         ))}
         {failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null}
-        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', cut(firstLine(r.failure.where), Math.max(20, inner * 2 - 8))) : null}
-        {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
-        {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
+        {!isSuite && r.status === 'failed' && (r.failure?.where || r.failure?.why) ? (
+          <ui.Box key="card-failure" flexDirection="row" gap={1}>
+            {r.failure.where ? <ui.Text dimColor>on</ui.Text> : null}
+            {r.failure.where ? (
+              <ui.Box flexShrink={0}>
+                <ui.Text>{cut(firstLine(r.failure.where), Math.max(16, Math.floor(inner / 2)))}</ui.Text>
+              </ui.Box>
+            ) : null}
+            {r.failure.where && r.failure.why ? <ui.Text dimColor>·</ui.Text> : null}
+            {r.failure.why ? (
+              <ui.Box flexShrink={1}>
+                <ui.Text color={C.coral} wrap="truncate-end">
+                  {firstLine(r.failure.why)}
+                </ui.Text>
+              </ui.Box>
+            ) : null}
+          </ui.Box>
+        ) : null}
         {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
         {!clickable && r.evidence ? fact(ui, 'evidence', r.evidence) : null}
         <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>

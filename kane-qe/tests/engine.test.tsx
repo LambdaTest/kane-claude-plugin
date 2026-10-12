@@ -647,7 +647,9 @@ describe('the card in the chat', () => {
       expect(await card.find({ type: 'Text', text: /^✗ failed$/ })).toBeDefined()
       expect(await card.find({ type: 'Text', text: /^31\.2 credits$/ })).toBeDefined()
       expect(await card.find({ type: 'Text', text: /^Postcode field rejects valid input$/ })).toBeDefined()
-      expect(await card.find({ type: 'Text', text: /^functional defect · high · 86% sure$/ })).toBeDefined()
+      // One line says where and why; the kind is in the pane, behind View steps, so a failed card is as tall as a passed one.
+      expect(await card.find({ type: 'Text', text: /^Fill the shipping address$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /functional defect/ })).toBeUndefined()
       expect(await card.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       expect(await card.find({ key: 'card-steps' })).toBeDefined()
       expect(await card.find({ key: 'card-evidence' })).toBeDefined()
