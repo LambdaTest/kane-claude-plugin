@@ -249,15 +249,17 @@ describe('the card in the chat', () => {
   test('a finished card closes with who verified it, ticked only when everything passed', () => {
     const done = (list: Parameters<typeof suite>[0], status: 'passed' | 'failed') => fold(suite(list), { k: 'suiteDone', status, at: T0 + 90_000 })
     const cases: { name: string; run: Run; all: boolean; want: string[] }[] = [
-      { name: 'a passed run', run: run('a', 'run', [label('x'), step(1, 'done', 'Sign in', 3), passed(41)]), all: true, want: ['✓', 'Verified with KaneAI'] },
-      { name: 'a failed run', run: run('b', 'run', [label('x'), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), all: false, want: ['Verified with KaneAI'] },
-      { name: 'a suite with every test passed', run: done(['passed', 'passed'], 'passed'), all: true, want: ['✓', 'Verified with KaneAI'] },
-      { name: 'a suite with one failure', run: done(['passed', 'failed'], 'failed'), all: false, want: ['Verified with KaneAI'] },
-      { name: 'a suite that ended with tests unstarted', run: done(['passed', 'pending'], 'failed'), all: false, want: ['Verified with KaneAI'] },
+      { name: 'a passed run', run: run('a', 'run', [label('x'), step(1, 'done', 'Sign in', 3), passed(41)]), all: true, want: [' ✓ Verified with KaneAI '] },
+      { name: 'a failed run', run: run('b', 'run', [label('x'), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), all: false, want: [' Verified with KaneAI '] },
+      { name: 'a suite with every test passed', run: done(['passed', 'passed'], 'passed'), all: true, want: [' ✓ Verified with KaneAI '] },
+      { name: 'a suite with one failure', run: done(['passed', 'failed'], 'failed'), all: false, want: [' Verified with KaneAI '] },
+      { name: 'a suite that ended with tests unstarted', run: done(['passed', 'pending'], 'failed'), all: false, want: [' Verified with KaneAI '] },
     ]
     for (const c of cases) {
       expect(allPassed(c.run), c.name).toBe(c.all)
       expect(cardFooter(c.run).map(s => s.t), c.name).toEqual(c.want)
+      // A filled chip, so it reads as a badge and not as one more line of text.
+      expect(cardFooter(c.run).every(s => s.bg !== undefined && s.b === true), c.name).toBe(true)
     }
   })
 
