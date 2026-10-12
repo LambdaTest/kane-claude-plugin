@@ -651,10 +651,8 @@ describe('the card in the chat', () => {
       expect(await card.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       expect(await card.find({ key: 'card-steps' })).toBeDefined()
       expect(await card.find({ key: 'card-evidence' })).toBeDefined()
-      // The card closes with a shield and who verified it.
-      expect(await card.find({ type: 'Text', text: /^Verified with$/ })).toBeDefined()
-      expect(await card.find({ type: 'Text', text: /^KaneAI$/ })).toBeDefined()
-      if (surface === 'terminal') expect(await card.find({ type: 'Raster', key: 'shield' })).toBeDefined()
+      // The card closes with the badge naming who verified it.
+      expect(await card.find({ type: 'Text', text: /^ ⛨ Verified with KaneAI $/ })).toBeDefined()
       await card.unmount()
     }
     // The card stands for the call: its raw output is gone.
@@ -698,8 +696,7 @@ describe('the card in the chat', () => {
     for (const full of [true, false]) {
       const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, { viewport: { columns: 100, rows: 40, isFullscreen: full } }), surface: 'terminal' } as never)
       expect(await card.find({ type: 'Text', text: /^✓ passed$/ })).toBeDefined()
-      expect(await card.find({ type: 'Text', text: /^Verified with$/ })).toBeDefined()
-      expect(await card.find({ type: 'Raster', key: 'shield' })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /^ ⛨ Verified with KaneAI $/ })).toBeDefined()
       await card.unmount()
     }
   })

@@ -7,6 +7,7 @@ import {
   latest,
   allPassed,
   cardFailures,
+  cardFooter,
   cardHeader,
   cardResult,
   isRunCommand,
@@ -27,7 +28,6 @@ import {
   tidyStep,
   isTrackedEdit,
 } from '../hooks/model'
-import { SHIELD, shieldCells, shieldSvg } from '../hooks/mascot'
 import type { BandOptions } from '../hooks/model'
 import type { Assurance, HistoryEntry, Kind, Run } from '../types'
 import { runFailed, runPassed, testmdPassed, testrunFailed, testrunPassed, testrunPassedMember } from './fixtures/fixtures'
@@ -246,25 +246,21 @@ describe('the card in the chat', () => {
     expect(narrow.result.map(s => s.t)).toEqual(['✓ passed'])
   })
 
-  test('everything passed: a run that passed, or a suite with every test passed and none left', () => {
+  test('a finished card closes with a shield badge naming who verified it, passed or failed', () => {
     const done = (list: Parameters<typeof suite>[0], status: 'passed' | 'failed') => fold(suite(list), { k: 'suiteDone', status, at: T0 + 90_000 })
-    const cases: { name: string; run: Run; all: boolean }[] = [
-      { name: 'a passed run', run: run('a', 'run', [label('x'), step(1, 'done', 'Sign in', 3), passed(41)]), all: true },
-      { name: 'a failed run', run: run('b', 'run', [label('x'), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), all: false },
-      { name: 'a suite with every test passed', run: done(['passed', 'passed'], 'passed'), all: true },
-      { name: 'a suite with one failure', run: done(['passed', 'failed'], 'failed'), all: false },
-      { name: 'a suite that ended with tests unstarted', run: done(['passed', 'pending'], 'failed'), all: false },
+    const cases: { name: string; run: Run; all: boolean; want: string[] }[] = [
+      { name: 'a passed run', run: run('a', 'run', [label('x'), step(1, 'done', 'Sign in', 3), passed(41)]), all: true, want: [' ⛨ Verified with KaneAI '] },
+      { name: 'a failed run', run: run('b', 'run', [label('x'), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), all: false, want: [' ⛨ Verified with KaneAI '] },
+      { name: 'a suite with every test passed', run: done(['passed', 'passed'], 'passed'), all: true, want: [' ⛨ Verified with KaneAI '] },
+      { name: 'a suite with one failure', run: done(['passed', 'failed'], 'failed'), all: false, want: [' ⛨ Verified with KaneAI '] },
+      { name: 'a suite that ended with tests unstarted', run: done(['passed', 'pending'], 'failed'), all: false, want: [' ⛨ Verified with KaneAI '] },
     ]
-    for (const c of cases) expect(allPassed(c.run), c.name).toBe(c.all)
-  })
-
-  test('the shield is three cells by two, and the same cells for the same colours', () => {
-    const cells = shieldCells('#b388ff', '#1c1a2b')
-    // Six cells of three u32 words each, base64.
-    expect(atob(cells).length).toBe(SHIELD.columns * SHIELD.rows * 12)
-    expect(shieldCells('#b388ff', '#1c1a2b')).toBe(cells)
-    expect(shieldCells('#6a3fd1', '#efedf5')).not.toBe(cells)
-    expect(shieldSvg('#b388ff', '#1c1a2b')).toContain('fill="#b388ff"')
+    for (const c of cases) {
+      expect(allPassed(c.run), c.name).toBe(c.all)
+      expect(cardFooter().map(s => s.t), c.name).toEqual(c.want)
+      // A filled chip, so it reads as a badge and not as one more line of text.
+      expect(cardFooter().every(s => s.bg !== undefined && s.b === true), c.name).toBe(true)
+    }
   })
 
   test('a suite’s card names three failures at most, newest first, then how many more', () => {
