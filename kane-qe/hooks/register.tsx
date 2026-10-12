@@ -1217,7 +1217,7 @@ export const register: Register = (on, options) => {
     else spinSites.delete(e.requestId)
     const press: Press = a => void act($, a).catch(() => undefined)
     return (
-      <table.Box flexDirection="row" gap={1}>
+      <table.Box flexDirection="row" gap={1} marginTop={1}>
         {mascot(table, e.surface, model.think, frame)}
         <table.Box flexDirection="column">{model.rows.map(r => line(table, press, r, spinner(table, e.surface, frame)))}</table.Box>
       </table.Box>

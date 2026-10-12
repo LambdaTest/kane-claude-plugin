@@ -106,6 +106,8 @@ describe('drawing', () => {
     await w.clock.settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...BAND, surface } as never)
+      // A blank row keeps the band clear of the line above it.
+      expect((await ui.find({ type: 'Box' }))?.props.marginTop).toBe(1)
       expect(await ui.find({ type: 'Text', text: /idle/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /assurance/ })).toBeDefined()
       expect(await ui.find({ key: 'open' })).toBeDefined()
