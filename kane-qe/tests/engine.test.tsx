@@ -1,7 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { CHEER_STEPS, STEP_MS, cheerCells, pixelFrame, poseAt, rasterCells } from '../hooks/mascot'
-import { C } from '../hooks/model'
 
 const T0 = Date.parse('2026-10-08T10:00:00.000Z')
 const HOME = '/home/qa'
@@ -25,21 +23,18 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; blits: { requestId: string; key: string; cells: string }[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
-  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], blits: [], rows: [], ignored: new Set(), ...w }
+  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], rows: [], ignored: new Set(), ...w }
   const clock = mock.clock(on, { now: T0 })
   mock.store(on, state.store)
   mock.env(on, { HOME })
   on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
-  on('ui.blit', ($, e) => {
-    state.blits.push(e as never)
-    return { value: {} } as never
-  })
+  on('ui.blit', () => ({ value: {} }) as never)
   on('prompt.submit', ($, e) => {
     state.prompts.push(String((e as { text?: unknown }).text))
     return { text: String((e as { text?: unknown }).text) } as never
@@ -709,57 +704,6 @@ describe('the card in the chat', () => {
       await card.unmount()
     }
   })
-
-  test('a run that just passed draws a tick in the mascot’s place, once, then the mascot is back', async ($, on) => {
-    const w = world(on)
-    const dir = await begin($, w)
-    await w.clock.advance(1500)
-    await w.clock.settle()
-    w.files[`${dir}/events.ndjson`] += line({ type: 'run_end', status: 'passed' }, 3) + line({ type: 'test_md_done', overall_status: 'passed', duration_s: 3 }, 3)
-    endRun(w, 71)
-    await w.clock.advance(1500)
-    await w.clock.settle()
-    const site = { ...row('ToolUse', 'toolu_1', CMD, FULL), surface: 'terminal' }
-    const resting = rasterCells(pixelFrame(poseAt(false, 0)))
-    const card = await $.ui.mount(site as never)
-    // The first frame is the start of the stroke, not the mascot.
-    expect((await card.find({ type: 'Raster', key: 'mascot' }))?.props.cells).toBe(cheerCells(0, C.mint, C.lilac))
-    w.blits.length = 0
-    await w.clock.advance(STEP_MS * (CHEER_STEPS + 4))
-    await w.clock.settle()
-    const drawn = w.blits.filter(b => b.requestId === site.requestId && b.key === 'mascot').map(b => b.cells)
-    expect(drawn.length).toBe(CHEER_STEPS)
-    expect(drawn[0]).toBe(cheerCells(1, C.mint, C.lilac))
-    expect(drawn[drawn.length - 1]).toBe(resting)
-    await card.unmount()
-    // Drawn again later, the card is still.
-    const again = await $.ui.mount(site as never)
-    expect((await again.find({ type: 'Raster', key: 'mascot' }))?.props.cells).toBe(resting)
-    w.blits.length = 0
-    await w.clock.advance(STEP_MS * 4)
-    expect(w.blits.filter(b => b.key === 'mascot')).toEqual([])
-    await again.unmount()
-  })
-
-  const STILL = [
-    { name: 'a failed run', status: 'failed', wait: 1500 },
-    { name: 'a pass that is old news when its card is first drawn', status: 'passed', wait: 60_000 },
-  ]
-  for (const c of STILL) {
-    test(`no tick for ${c.name}`, async ($, on) => {
-      const w = world(on)
-      const dir = await begin($, w)
-      await w.clock.advance(1500)
-      await w.clock.settle()
-      w.files[`${dir}/events.ndjson`] += line({ type: 'run_end', status: c.status }, 3) + line({ type: 'test_md_done', overall_status: c.status, duration_s: 3 }, 3)
-      endRun(w, 71)
-      await w.clock.advance(c.wait)
-      await w.clock.settle()
-      const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
-      expect((await card.find({ type: 'Raster', key: 'mascot' }))?.props.cells).toBe(rasterCells(pixelFrame(poseAt(false, 0))))
-      await card.unmount()
-    })
-  }
 
   test('where the chat is printed text, the card ends with the evidence path, not buttons', async ($, on) => {
     const w = world(on)

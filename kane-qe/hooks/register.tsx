@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { CHEER_STEPS, PICTURE, RASTER, STEP_MS, cheerCells, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
+import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -96,12 +96,6 @@ let polling = false
 const sites = new Set<string>()
 /** Sites that draw the running-step spinner: repainted in place with the mascot. */
 const spinSites = new Set<string>()
-/** Cards drawing the tick of a run that just passed: the site, and the step it is on. */
-const cheers = new Map<string, number>()
-/** Runs whose tick has played, so a card drawn again later stays still. */
-const cheered = new Set<string>()
-/** A pass older than this when its card is first drawn is not news: a resumed chat stays still. */
-const CHEER_FRESH_MS = 15_000
 let frame = 0
 let thinking = false
 let remote = false
@@ -508,7 +502,7 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: str
 }
 
 /** A run Claude started, as a card in the chat in place of its shell row: one line while it runs, then its result. */
-function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean, cheer?: number) {
+function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean) {
   const ui: Kit = table
   if (r.status === 'running' || r.status === 'pending') {
     const suite = r.kind === 'testrun' && r.members ? cardHeader(r, now, columns).result : undefined
@@ -538,7 +532,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
   const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
   return (
     <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={allPassed(r) ? C.mint : C.coral} paddingX={1}>
-      {cheer !== undefined && 'Raster' in table ? <table.Raster key="mascot" columns={RASTER.columns} rows={RASTER.rows} cells={cheerCells(cheer, C.mint, C.lilac)} /> : mascot(table, surface, false, 0)}
+      {mascot(table, surface, false, 0)}
       <ui.Box flexDirection="column" flexGrow={1} flexShrink={1}>
         <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
           <ui.Box flexDirection="row" gap={1} flexShrink={1}>
@@ -1056,13 +1050,6 @@ async function pulse($: EngineInterface) {
 }
 
 function paint($: EngineInterface) {
-  for (const [requestId, n] of cheers) {
-    const over = n + 1 >= CHEER_STEPS
-    const cells = over ? rasterCells(pixelFrame(poseAt(false, 0))) : cheerCells(n + 1, C.mint, C.lilac)
-    if (over) cheers.delete(requestId)
-    else cheers.set(requestId, n + 1)
-    void $.ui.blit({ requestId, key: 'mascot', cells }).catch(() => cheers.delete(requestId))
-  }
   if (!thinking || sites.size === 0) return
   if (!remote) frame += 1
   const cells = rasterCells(pixelFrame(poseAt(true, frame)))
@@ -1081,13 +1068,7 @@ async function chatCardAt($: EngineInterface, e: { requestId: string; surface: R
   const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
   if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
   else spinSites.delete(e.requestId)
-  const now = await $.clock.now()
-  // A run that just passed draws a tick in the mascot's place, once, where the cell grid can be repainted.
-  if (e.surface === 'terminal' && allPassed(r) && !cheered.has(r.id)) {
-    cheered.add(r.id)
-    if (now - (r.endedAt ?? 0) < CHEER_FRESH_MS) cheers.set(e.requestId, 0)
-  }
-  return chatCard($.ui.resolve(e as never), e.surface, press, r, now, e.viewport?.columns ?? 90, clickable, cheers.get(e.requestId))
+  return chatCard($.ui.resolve(e as never), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
 }
 
 // ── the mod ──────────────────────────────────────────────────────────────
@@ -1101,8 +1082,6 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     projectDir = String((e as { cwd?: unknown }).cwd ?? '').replace(/\/$/, '')
-    cheers.clear()
-    cheered.clear()
     const home = await $.env.get('HOME').catch(() => undefined)
     if (home) activeDir = `${home}/.testmuai/kaneai/sessions/active`
     await $.command.register({ name: 'kane', description: 'Kane: open the runs pane; /kane assurance; /kane history; /kane auto | ask | off for changes', argumentHint: '[assurance | history | auto | ask | off]' })
