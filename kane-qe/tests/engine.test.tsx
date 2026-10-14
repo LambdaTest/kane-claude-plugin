@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { C } from '../hooks/model'
 
 const T0 = Date.parse('2026-10-08T10:00:00.000Z')
 const HOME = '/home/qa'
@@ -648,6 +649,7 @@ describe('the card in the chat', () => {
       const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface } as never)
       expect(await card.find({ type: 'Text', text: /^✗ failed$/ })).toBeDefined()
       expect(await card.find({ type: 'Text', text: /^31\.2 credits$/ })).toBeDefined()
+      expect((await card.find({ type: 'Box' }))?.props.borderColor).toBe(C.coral)
       expect(await card.find({ type: 'Text', text: /^Postcode field rejects valid input$/ })).toBeDefined()
       // One line says where and why; the kind is in the pane, behind View steps, so a failed card is as tall as a passed one.
       expect(await card.find({ type: 'Text', text: /^Fill the shipping address$/ })).toBeDefined()
@@ -700,6 +702,7 @@ describe('the card in the chat', () => {
     for (const full of [true, false]) {
       const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, { viewport: { columns: 100, rows: 40, isFullscreen: full } }), surface: 'terminal' } as never)
       expect(await card.find({ type: 'Text', text: /^✓ passed$/ })).toBeDefined()
+      expect((await card.find({ type: 'Box' }))?.props.borderColor).toBe(C.mint)
       expect(await card.find({ type: 'Text', text: /^ ⛨ Verified with KaneAI $/ })).toBeDefined()
       await card.unmount()
     }
@@ -757,34 +760,45 @@ describe('the card in the chat', () => {
     }
   })
 
-  test('a folded group of shell calls stays folded; a run it holds is drawn as a card beneath its line', async ($, on) => {
+  test('a folded group holding one run stays folded, with the run’s card beneath its line', async ($, on) => {
     const w = world(on, { viewer: 'https://viewer.example/?pack=p' })
     const dir = await begin($, w)
     await w.clock.advance(1500)
     await w.clock.settle()
-    fail(w, dir)
-    await w.clock.advance(1500)
-    await w.clock.settle()
-    const group = (calls: { id: string; command: string }[], isExpanded = false) => ({
+    const group = (calls: { id?: string; command: string }[], more: { isExpanded?: boolean; isActive?: boolean } = {}) => ({
       plugin: 'kane-qe',
       component: 'ToolGroup',
       requestId: 'g1',
       surface: 'terminal',
       ...FULL,
-      props: { calls: calls.map(c => ({ tool_use_id: c.id, tool: 'Bash', input: { command: c.command }, isRunning: false, isErrored: false })), isActive: false, isExpanded },
+      props: { calls: calls.map(c => ({ tool_use_id: c.id, tool: 'Bash', input: { command: c.command }, isRunning: false, isErrored: false })), isActive: false, isExpanded: false, ...more },
     })
-    const cases = [
-      { name: 'no kane-cli run', calls: [{ id: 't0', command: 'ls' }, { id: 't1', command: 'git status' }], card: false },
-      { name: 'a kane-cli command that is no run', calls: [{ id: 't0', command: 'kane-cli whoami' }], card: false },
-      { name: 'a run command no run came of', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_none', command: CMD }], card: false },
-      { name: 'a run among other calls', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }, { id: 't2', command: 'pwd' }], card: true },
-      { name: 'a group the person unfolded: its rows draw the card', calls: [{ id: 'toolu_1', command: CMD }], expanded: true, card: false },
+    const folded = async (g: { find: (q: object) => Promise<unknown> }) => w.rows.find(r => r.component === 'ToolGroup')?.isExpanded
+    // While the run goes, the card beneath the line is its one running line, with the spinner.
+    w.rows.length = 0
+    const live = await $.ui.mount(group([{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }], { isActive: true }) as never)
+    expect(await folded(live)).toBe(false)
+    expect(await live.find({ type: 'Text', text: /^engine ToolGroup$/ })).toBeDefined()
+    expect(await live.find({ type: 'Raster', key: 'spin' })).toBeDefined()
+    expect(await live.find({ type: 'Text', text: /Fill the shipping address/ })).toBeDefined()
+    await live.unmount()
+
+    fail(w, dir)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const cases: { name: string; calls: { id?: string; command: string }[]; expanded?: boolean; unfold: boolean; card: boolean }[] = [
+      { name: 'no kane-cli run', calls: [{ id: 't0', command: 'ls' }, { id: 't1', command: 'git status' }], unfold: false, card: false },
+      { name: 'a kane-cli command that is no run', calls: [{ id: 't0', command: 'kane-cli whoami' }], unfold: false, card: false },
+      { name: 'a run command no run came of', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_none', command: CMD }], unfold: false, card: false },
+      { name: 'one run among other calls', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }, { id: 't2', command: 'pwd' }], unfold: false, card: true },
+      { name: 'two runs: each row draws its own card', calls: [{ id: 'toolu_1', command: CMD }, { id: 'toolu_2', command: CMD }], unfold: true, card: false },
+      { name: 'a run call without its id: its row draws the card', calls: [{ command: CMD }], unfold: true, card: false },
+      { name: 'a group the person unfolded', calls: [{ id: 'toolu_1', command: CMD }], expanded: true, unfold: true, card: false },
     ]
     for (const c of cases) {
       w.rows.length = 0
-      const g = await $.ui.mount(group(c.calls, c.expanded) as never)
-      // The mod never unfolds the group: the engine's own line is drawn as it came.
-      expect(w.rows.find(r => r.component === 'ToolGroup')?.isExpanded, c.name).toBe(c.expanded ?? false)
+      const g = await $.ui.mount(group(c.calls, { isExpanded: c.expanded ?? false }) as never)
+      expect(await folded(g), c.name).toBe(c.unfold)
       expect(await g.find({ type: 'Text', text: /^engine ToolGroup$/ }), c.name).toBeDefined()
       expect((await g.find({ type: 'Text', text: /^✗ failed$/ })) !== undefined, c.name).toBe(c.card)
       expect((await g.find({ key: 'card-evidence' })) !== undefined, c.name).toBe(c.card)

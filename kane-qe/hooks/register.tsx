@@ -14,7 +14,6 @@ import {
   ORDER,
   band,
   bar,
-  allPassed,
   cardFailures,
   cardFooter,
   cardHeader,
@@ -531,7 +530,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
   const failures = isSuite ? cardFailures(r) : undefined
   const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
   return (
-    <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={allPassed(r) ? C.mint : C.coral} paddingX={1}>
+    <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.mint} paddingX={1}>
       {mascot(table, surface, false, 0)}
       <ui.Box flexDirection="column" flexGrow={1} flexShrink={1}>
         <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
@@ -1141,21 +1140,22 @@ export const register: Register = (on, options) => {
   })
 
   // A kane-cli run Claude started is drawn as a card in the chat, in place of its shell row.
-  // The chat folds shell calls into one count line: the group stays folded, and each run it holds is drawn as a card beneath that line.
+  // The chat folds shell calls into one count line. A group holding one run stays folded, with that run's card beneath its line;
+  // a group holding several runs, or a run call without its id, is unfolded so each row draws its own card.
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
     if (e.props.isExpanded) return next(e)
-    const ids = e.props.calls.filter(c => c.tool === 'Bash' && isRunCommand(commandOf(c.input))).map(c => c.tool_use_id)
-    const held = ids.length ? (await read($, runsAtom)).filter(r => r.toolUseId !== undefined && ids.includes(r.toolUseId)) : []
-    if (!held.length) return next(e)
+    const calls = e.props.calls.filter(c => c.tool === 'Bash' && isRunCommand(commandOf(c.input)))
+    if (!calls.length) return next(e)
+    if (calls.length > 1 || calls[0]!.tool_use_id === undefined) return next({ ...e, props: { ...e.props, isExpanded: true } })
+    const r = (await read($, runsAtom)).find(x => x.toolUseId === calls[0]!.tool_use_id)
+    if (!r) return next(e)
     const ui: Kit = $.ui.resolve(e)
     const line = await next(e)
-    const cards = await Promise.all(held.map(r => chatCardAt($, e, r)))
+    const card = await chatCardAt($, e, r)
     return (
       <ui.Box flexDirection="column">
         {line}
-        {cards.map((c, i) => (
-          <ui.Box key={`group-card-${held[i]!.id}`}>{c}</ui.Box>
-        ))}
+        {card}
       </ui.Box>
     )
   })
