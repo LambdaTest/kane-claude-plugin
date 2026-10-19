@@ -5,7 +5,10 @@ import type { Ev } from '../hooks/adapter'
 import {
   band,
   latest,
+  allPassed,
   cardFailures,
+  cardFooter,
+  firstLine,
   cardHeader,
   cardResult,
   isRunCommand,
@@ -26,6 +29,7 @@ import {
   tidyStep,
   isTrackedEdit,
 } from '../hooks/model'
+import { mascotSvg, setPicture } from '../hooks/mascot'
 import type { BandOptions } from '../hooks/model'
 import type { Assurance, HistoryEntry, Kind, Run } from '../types'
 import { runFailed, runPassed, testmdPassed, testrunFailed, testrunPassed, testrunPassedMember } from './fixtures/fixtures'
@@ -227,6 +231,8 @@ describe('the card in the chat', () => {
     { name: 'a passed run: status, time, credits', run: run('a', 'run', [label('login_test.md'), step(1, 'done', 'Sign in', 3), passed(41)]), want: ['✓ passed', '41s', '12.4 credits'] },
     { name: 'a failed run with no credits reported shows none', run: run('b', 'run', [label('x'), step(1, 'failed', 'Open', 3), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), want: ['✗ failed', '1m 06s'] },
     { name: 'a finished suite: its counts and time', run: fold(suite(['passed', 'passed', 'failed']), { k: 'suiteDone', status: 'failed', at: T0 + 90_000 }), want: ['2 passed', '1 failed', '1m 30s'] },
+    { name: 'a finished suite with no failure says so in one mark', run: fold(suite(['passed', 'passed', 'passed']), { k: 'suiteDone', status: 'passed', at: T0 + 90_000 }), want: ['✓ all 3 passed', '1m 30s'] },
+    { name: 'a suite that ended failed with every reported test passed keeps its counts', run: fold(suite(['passed', 'passed']), { k: 'suiteDone', status: 'failed', at: T0 + 90_000 }), want: ['2 passed', '1m 30s'] },
     { name: 'a suite still going says what is left', run: suite(['passed', 'running', 'pending']), want: ['1 passed', '1 running', '1 left', '1m 10s'] },
   ]
   for (const c of cases) test(c.name, () => expect(texts(c.run)).toEqual(c.want))
@@ -241,6 +247,41 @@ describe('the card in the chat', () => {
     expect(mid.result[0]!.t).toBe('✓ passed')
     const narrow = cardHeader(r, T0 + 50_000, 30)
     expect(narrow.result.map(s => s.t)).toEqual(['✓ passed'])
+  })
+
+  test('everything passed only when the run ended passed, and for a suite every one of its tests did', () => {
+    const done = (list: Parameters<typeof suite>[0], status: 'passed' | 'failed') => fold(suite(list), { k: 'suiteDone', status, at: T0 + 90_000 })
+    const cases: { name: string; run: Run; all: boolean }[] = [
+      { name: 'a passed run', run: run('a', 'run', [label('x'), step(1, 'done', 'Sign in', 3), passed(41)]), all: true },
+      { name: 'a failed run', run: run('b', 'run', [label('x'), { k: 'runEnd', status: 'failed', why: 'boom', at: T0 + 66_000 }]), all: false },
+      { name: 'a suite with every test passed', run: done(['passed', 'passed'], 'passed'), all: true },
+      { name: 'a suite with one failure', run: done(['passed', 'failed'], 'failed'), all: false },
+      { name: 'a suite that ended failed though every test it reported passed', run: done(['passed', 'passed'], 'failed'), all: false },
+      { name: 'a suite that ended passed with a test unreported', run: done(['passed', 'pending'], 'passed'), all: false },
+      { name: 'a suite still running', run: suite(['passed', 'running']), all: false },
+    ]
+    for (const c of cases) expect(allPassed(c.run), c.name).toBe(c.all)
+  })
+
+  test('the card closes with one solid badge naming who verified it', () => {
+    expect(cardFooter().map(s => s.t)).toEqual([' ⛨ Verified with KaneAI '])
+    expect(cardFooter().every(s => s.bg !== undefined && s.b === true)).toBe(true)
+  })
+
+  test('the first line of a reason or a step is its first line that is not blank', () => {
+    const cases: [string, string][] = [
+      ['Postcode rejected', 'Postcode rejected'],
+      ['Postcode rejected\nmore detail', 'Postcode rejected'],
+      ['\n  Postcode rejected  \nmore', 'Postcode rejected'],
+      ['\n\n', ''],
+    ]
+    for (const [text, want] of cases) expect(firstLine(text), JSON.stringify(text)).toBe(want)
+  })
+
+  test('the mascot as a picture: the vector stand-in alone until its frame is read, then the frame', () => {
+    expect(mascotSvg('xh')).not.toContain('<image')
+    setPicture('xh', 'AAAA')
+    expect(mascotSvg('xh')).toContain('data:image/png;base64,AAAA')
   })
 
   test('a suite’s card names three failures at most, newest first, then how many more', () => {

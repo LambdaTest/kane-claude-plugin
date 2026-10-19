@@ -532,11 +532,24 @@ export function kindLine(r: Run): string | undefined {
 
 // ── the card in the chat ─────────────────────────────────────────────────
 
-/** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", or a suite's counts. Each part only if kane-cli reported it. */
+/** True when a run ended passed with nothing but passes: the run itself, or a suite and every one of its tests. */
+export function allPassed(r: Run): boolean {
+  if (r.status !== 'passed') return false
+  if (r.kind === 'testrun' && r.members) return r.members.length > 0 && r.members.every(m => m.status === 'passed')
+  return true
+}
+
+/** The badge that closes a finished card: who ran the check, as a solid chip in kane's colour behind a shield. */
+export function cardFooter(): Span[] {
+  return [{ t: ' ⛨ Verified with KaneAI ', bg: C.purple, c: C.chipIdle, b: true }]
+}
+
+/** A chat card's right-hand result: "✓ passed · 41s · 12.4 credits", a suite's counts, or "✓ all 3 passed" when none failed. Each part only if kane-cli reported it. */
 export function cardResult(r: Run, now: number): Span[] {
   const time = fmt(elapsed(r, now))
   if (r.kind === 'testrun' && r.members) {
     const c = tally(r.members)
+    if (allPassed(r)) return [{ t: c.total === 1 ? '✓ passed' : `✓ all ${c.total} passed`, c: C.mint, b: true }, { t: time, d: true }]
     const out: Span[] = []
     if (c.passed) out.push({ t: `${c.passed} passed`, c: C.mint })
     if (c.failed) out.push({ t: `${c.failed} failed`, c: C.coral })
@@ -559,8 +572,8 @@ export function cardHeader(r: Run, now: number, room: number): { name: string; r
   return { name: cut(r.label, Math.max(min, room - width(result) - 8)), result }
 }
 
-/** The first line of a step's text: a designed test's step can run to a paragraph. */
-export const firstLine = (t: string): string => t.split('\n')[0]!.trim()
+/** The first line of a step's text that is not blank: a designed test's step can run to a paragraph. */
+export const firstLine = (t: string): string => t.split('\n').map(l => l.trim()).find(Boolean) ?? ''
 
 /** A suite card's failures: three at most, then how many more. */
 export function cardFailures(r: Run): { rows: Run[]; more: number } {

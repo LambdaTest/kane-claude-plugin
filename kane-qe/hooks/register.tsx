@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
+import { PICTURE, POSES, RASTER, STEP_MS, mascotSvg, setPicture, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -15,6 +15,7 @@ import {
   band,
   bar,
   cardFailures,
+  cardFooter,
   cardHeader,
   currentStep,
   cells,
@@ -527,7 +528,6 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
   const head = cardHeader(r, now, inner)
   const isSuite = r.kind === 'testrun' && !!r.members
   const failures = isSuite ? cardFailures(r) : undefined
-  const kind = kindLine(r)
   const steps = r.steps.filter(s => s.text || s.status !== 'pending').length
   return (
     <ui.Box marginTop={1} width={width} flexDirection="row" gap={2} borderStyle="round" borderColor={r.status === 'failed' ? C.coral : C.mint} paddingX={1}>
@@ -556,19 +556,35 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
           </ui.Box>
         ))}
         {failures && failures.more ? <ui.Text dimColor>{`+${failures.more} more`}</ui.Text> : null}
-        {!isSuite && r.status === 'failed' && r.failure?.where ? fact(ui, 'on', cut(firstLine(r.failure.where), Math.max(20, inner * 2 - 8))) : null}
-        {!isSuite && r.status === 'failed' && r.failure?.why ? fact(ui, 'why', r.failure.why) : null}
-        {!isSuite && r.status === 'failed' && kind ? fact(ui, 'kind', kind) : null}
-        {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
-        {clickable ? <ui.Text> </ui.Text> : null}
-        {clickable ? (
-          <ui.Box flexDirection="row" gap={1}>
-            {isSuite || r.status === 'failed' ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
-            {r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+        {!isSuite && r.status === 'failed' && (r.failure?.where || r.failure?.why) ? (
+          <ui.Box key="card-failure" flexDirection="row" gap={1}>
+            {r.failure.where ? <ui.Text dimColor>on</ui.Text> : null}
+            {r.failure.where ? (
+              <ui.Box flexShrink={0}>
+                <ui.Text>{cut(firstLine(r.failure.where), Math.max(16, Math.floor(inner / 2)))}</ui.Text>
+              </ui.Box>
+            ) : null}
+            {r.failure.where && r.failure.why ? <ui.Text dimColor>·</ui.Text> : null}
+            {r.failure.why ? (
+              <ui.Box flexShrink={1}>
+                <ui.Text color={C.coral} wrap="truncate-end">
+                  {firstLine(r.failure.why)}
+                </ui.Text>
+              </ui.Box>
+            ) : null}
           </ui.Box>
-        ) : r.evidence ? (
-          fact(ui, 'evidence', r.evidence)
         ) : null}
+        {!isSuite && r.status === 'passed' && steps ? <ui.Text dimColor>{`${steps} step${steps === 1 ? '' : 's'}`}</ui.Text> : null}
+        {!clickable && r.evidence ? fact(ui, 'evidence', r.evidence) : null}
+        <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
+          <ui.Box flexDirection="row" gap={1}>
+            {clickable && (isSuite || r.status === 'failed') ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
+            {clickable && r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+          </ui.Box>
+          <ui.Box key="card-verified" flexDirection="row" gap={1} flexShrink={0}>
+            {cardFooter().map(s => text(ui, s))}
+          </ui.Box>
+        </ui.Box>
       </ui.Box>
     </ui.Box>
   )
@@ -898,7 +914,7 @@ async function openOffer($: EngineInterface) {
   const history = (await recent($))[projectDir] ?? []
   const last: Record<string, HistoryEntry> = {}
   for (const t of tests) {
-    const hit = history.find(h => h.label === t.name || h.label.endsWith(`/${t.name}`))
+    const hit = history.find(entry => entry.label === t.name || entry.label.endsWith(`/${t.name}`))
     if (hit) last[t.name] = hit
   }
   const saved = savedTestsFor(files, tests, last)
@@ -1023,6 +1039,15 @@ async function act($: EngineInterface, a: string) {
   }
 }
 
+/** Reads the mascot's pictures from the plugin's own files, for surfaces that draw it as an image, then redraws. */
+async function loadPictures($: EngineInterface) {
+  for (const pose of POSES) {
+    const { base64 } = await $.fs.read(`${$.plugin.root}/assets/mascot/${pose}.png`, { as: 'bytes' })
+    setPicture(pose, base64)
+  }
+  await update($, tickAtom, n => n + 1)
+}
+
 // ── the mascot's animation ───────────────────────────────────────────────
 
 /** Where the mascot is an image, step its frame by redrawing the sites that show it. */
@@ -1039,6 +1064,19 @@ function paint($: EngineInterface) {
   for (const requestId of sites) void $.ui.blit({ requestId, key: 'mascot', cells }).catch(() => sites.delete(requestId))
   const spin = spinnerCells(frame, C.cyan)
   for (const requestId of spinSites) void $.ui.blit({ requestId, key: 'spin', cells: spin }).catch(() => spinSites.delete(requestId))
+}
+
+const commandOf = (input: unknown): string => String((input as { command?: unknown } | undefined)?.command ?? '')
+
+/** A run's card at a chat site: a shell row, or beneath a folded group of them. */
+async function chatCardAt($: EngineInterface, e: { requestId: string; surface: RenderSurface; viewport?: { columns: number; isFullscreen?: boolean } }, r: Run) {
+  await read($, tickAtom)
+  const press: Press = a => void act($, a).catch(() => undefined)
+  // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
+  const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
+  if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
+  else spinSites.delete(e.requestId)
+  return chatCard($.ui.resolve(e as never), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
 }
 
 // ── the mod ──────────────────────────────────────────────────────────────
@@ -1061,14 +1099,14 @@ export const register: Register = (on, options) => {
     void loadLast($).catch(() => undefined)
     void refreshAssurance($).catch(() => undefined)
     void readTheme($).catch(() => undefined)
+    void loadPictures($).catch(() => undefined)
     return started
   })
 
   // The palette follows Claude Code's theme: the design's colours are for dark backgrounds.
   on('config.set', { key: 'theme' }, async ($, e, next) => {
-    const result = await next(e)
-    if (!result.deny) await themeChanged($, e.value).catch(() => undefined)
-    return result
+    void themeChanged($, e.value).catch(() => undefined)
+    return next(e)
   })
 
   on('command.run', { command: 'kane' }, async ($, e) => {
@@ -1111,24 +1149,32 @@ export const register: Register = (on, options) => {
   })
 
   // A kane-cli run Claude started is drawn as a card in the chat, in place of its shell row.
-  // The chat folds shell calls into one count line: a group holding a run is unfolded, so its row is drawn.
+  // The chat folds shell calls into one count line. A group holding one run stays folded, with that run's card beneath its line;
+  // a group holding several runs, or a run call without its id, is unfolded so each row draws its own card.
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
-    if (e.props.isExpanded || !e.props.calls.some(c => c.tool === 'Bash' && isRunCommand(String((c.input as { command?: unknown } | undefined)?.command ?? '')))) return next(e)
-    return next({ ...e, props: { ...e.props, isExpanded: true } })
+    if (e.props.isExpanded) return next(e)
+    const calls = e.props.calls.filter(c => c.tool === 'Bash' && isRunCommand(commandOf(c.input)))
+    if (!calls.length) return next(e)
+    if (calls.length > 1 || calls[0]!.tool_use_id === undefined) return next({ ...e, props: { ...e.props, isExpanded: true } })
+    const r = (await read($, runsAtom)).find(x => x.toolUseId === calls[0]!.tool_use_id)
+    if (!r) return next(e)
+    const ui: Kit = $.ui.resolve(e)
+    const line = await next(e)
+    const card = await chatCardAt($, e, r)
+    return (
+      <ui.Box flexDirection="column">
+        {line}
+        {card}
+      </ui.Box>
+    )
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (e.props.tool !== 'Bash' || !isRunCommand(String((e.props.input as { command?: unknown } | undefined)?.command ?? ''))) return next(e)
+    if (e.props.tool !== 'Bash' || !isRunCommand(commandOf(e.props.input))) return next(e)
     const r = (await read($, runsAtom)).find(x => x.toolUseId === e.props.tool_use_id)
     // No run came of the command (kane-cli refused or failed to start): its own row says why.
     if (!r) return next(e)
-    await read($, tickAtom)
-    const press: Press = a => void act($, a).catch(() => undefined)
-    // Printed text takes no clicks: only the desktop and the fullscreen terminal draw buttons.
-    const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
-    if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
-    else spinSites.delete(e.requestId)
-    return chatCard($.ui.resolve(e), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
+    return chatCardAt($, e, r)
   })
 
   // The card stands for the whole call: once the run has a result, kane-cli's raw output is not drawn beneath it.
@@ -1159,7 +1205,7 @@ export const register: Register = (on, options) => {
     else spinSites.delete(e.requestId)
     const press: Press = a => void act($, a).catch(() => undefined)
     return (
-      <table.Box flexDirection="row" gap={1}>
+      <table.Box flexDirection="row" gap={1} marginTop={1}>
         {mascot(table, e.surface, model.think, frame)}
         <table.Box flexDirection="column">{model.rows.map(r => line(table, press, r, spinner(table, e.surface, frame)))}</table.Box>
       </table.Box>

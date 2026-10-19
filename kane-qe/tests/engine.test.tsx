@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { C } from '../hooks/model'
 
 const T0 = Date.parse('2026-10-08T10:00:00.000Z')
 const HOME = '/home/qa'
@@ -23,11 +24,11 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; reads: string[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
-  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], rows: [], ignored: new Set(), ...w }
+  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], reads: [], rows: [], ignored: new Set(), ...w }
   const clock = mock.clock(on, { now: T0 })
   mock.store(on, state.store)
   mock.env(on, { HOME })
@@ -46,7 +47,13 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
     const names = Object.keys(state.files).filter(f => f.startsWith(dir) && !f.slice(dir.length).includes('/'))
     return { value: names.map(f => ({ name: f.slice(dir.length), kind: 'file', size: state.files[f]!.length, mtimeMs: 0, isLink: false })) } as never
   })
-  on('fs.read', ($, e) => (e.path in state.files ? { value: state.files[e.path] } : { deny: 'ENOENT' }) as never)
+  on('fs.read', ($, e) => {
+    state.reads.push(e.path)
+    // The mascot's pictures, shipped with the plugin.
+    const picture = e.path.match(/\/assets\/mascot\/(\w+)\.png$/)
+    if (picture) return { value: { base64: `png-${picture[1]}` } } as never
+    return (e.path in state.files ? { value: state.files[e.path] } : { deny: 'ENOENT' }) as never
+  })
   on('fs.stat', ($, e) => (e.path in state.files ? { value: { kind: 'file', size: state.files[e.path]!.length, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
   on('process.run', ($, e) => {
     const argv = e.argv
@@ -101,12 +108,19 @@ describe('drawing', () => {
     await w.clock.settle()
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...BAND, surface } as never)
+      // A blank row keeps the band clear of the line above it.
+      expect((await ui.find({ type: 'Box' }))?.props.marginTop).toBe(1)
       expect(await ui.find({ type: 'Text', text: /idle/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /assurance/ })).toBeDefined()
       expect(await ui.find({ key: 'open' })).toBeDefined()
       expect(await ui.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       await ui.unmount()
     }
+    // The mascot's pictures are the plugin's own files, read once the session starts, and drawn where the mascot is an image.
+    expect(w.reads.filter(p => /\/assets\/mascot\/\w+\.png$/.test(p)).length).toBe(7)
+    const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('data:image/png;base64,png-c')
+    await desktop.unmount()
   })
 
   test('colours follow Claude Code’s theme: the design’s palette on dark, a darker one on light', async ($, on) => {
@@ -646,11 +660,16 @@ describe('the card in the chat', () => {
       const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface } as never)
       expect(await card.find({ type: 'Text', text: /^✗ failed$/ })).toBeDefined()
       expect(await card.find({ type: 'Text', text: /^31\.2 credits$/ })).toBeDefined()
+      expect((await card.find({ type: 'Box' }))?.props.borderColor).toBe(C.coral)
       expect(await card.find({ type: 'Text', text: /^Postcode field rejects valid input$/ })).toBeDefined()
-      expect(await card.find({ type: 'Text', text: /^functional defect · high · 86% sure$/ })).toBeDefined()
+      // One line says where and why; the kind is in the pane, behind View steps, so a failed card is as tall as a passed one.
+      expect(await card.find({ type: 'Text', text: /^Fill the shipping address$/ })).toBeDefined()
+      expect(await card.find({ type: 'Text', text: /functional defect/ })).toBeUndefined()
       expect(await card.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       expect(await card.find({ key: 'card-steps' })).toBeDefined()
       expect(await card.find({ key: 'card-evidence' })).toBeDefined()
+      // The card closes with the badge naming who verified it.
+      expect(await card.find({ type: 'Text', text: /^ ⛨ Verified with KaneAI $/ })).toBeDefined()
       await card.unmount()
     }
     // The card stands for the call: its raw output is gone.
@@ -679,6 +698,25 @@ describe('the card in the chat', () => {
     expect(await pane.find({ type: 'Text', text: /^where$/ })).toBeDefined()
     await pane.unmount()
     await card.unmount()
+  })
+
+  test('a passed run’s card is ticked in its result and closes with the badge', async ($, on) => {
+    const w = world(on)
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    w.files[`${dir}/events.ndjson`] +=
+      line({ type: 'test_md_step_end', step_index: 1, status: 'passed', duration_s: 20 }, 22) + line({ type: 'run_end', status: 'passed' }, 22) + line({ type: 'test_md_done', overall_status: 'passed', duration_s: 22 }, 22)
+    endRun(w, 71)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    for (const full of [true, false]) {
+      const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, { viewport: { columns: 100, rows: 40, isFullscreen: full } }), surface: 'terminal' } as never)
+      expect(await card.find({ type: 'Text', text: /^✓ passed$/ })).toBeDefined()
+      expect((await card.find({ type: 'Box' }))?.props.borderColor).toBe(C.mint)
+      expect(await card.find({ type: 'Text', text: /^ ⛨ Verified with KaneAI $/ })).toBeDefined()
+      await card.unmount()
+    }
   })
 
   test('where the chat is printed text, the card ends with the evidence path, not buttons', async ($, on) => {
@@ -733,28 +771,55 @@ describe('the card in the chat', () => {
     }
   })
 
-  test('a folded group of shell calls is unfolded only when it holds a kane-cli run', async ($, on) => {
-    const w = world(on)
-    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
-    const group = (commands: string[]) => ({
+  test('a folded group holding one run stays folded, with the run’s card beneath its line', async ($, on) => {
+    const w = world(on, { viewer: 'https://viewer.example/?pack=p' })
+    const dir = await begin($, w)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const group = (calls: { id?: string; command: string }[], more: { isExpanded?: boolean; isActive?: boolean } = {}) => ({
       plugin: 'kane-qe',
       component: 'ToolGroup',
       requestId: 'g1',
       surface: 'terminal',
-      props: { calls: commands.map((command, i) => ({ tool_use_id: `t${i}`, tool: 'Bash', input: { command }, isRunning: false, isErrored: false })), isActive: false, isExpanded: false },
+      ...FULL,
+      props: { calls: calls.map(c => ({ tool_use_id: c.id, tool: 'Bash', input: { command: c.command }, isRunning: false, isErrored: false })), isActive: false, isExpanded: false, ...more },
     })
-    const cases = [
-      { commands: ['ls', 'git status'], want: false },
-      { commands: ['kane-cli whoami'], want: false },
-      { commands: ['ls', CMD], want: true },
-      { commands: ['kane-cli run "Search for iPod" --agent'], want: true },
+    const folded = async (g: { find: (q: object) => Promise<unknown> }) => w.rows.find(r => r.component === 'ToolGroup')?.isExpanded
+    // While the run goes, the card beneath the line is its one running line, with the spinner.
+    w.rows.length = 0
+    const live = await $.ui.mount(group([{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }], { isActive: true }) as never)
+    expect(await folded(live)).toBe(false)
+    expect(await live.find({ type: 'Text', text: /^engine ToolGroup$/ })).toBeDefined()
+    expect(await live.find({ type: 'Raster', key: 'spin' })).toBeDefined()
+    expect(await live.find({ type: 'Text', text: /Fill the shipping address/ })).toBeDefined()
+    await live.unmount()
+
+    fail(w, dir)
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const cases: { name: string; calls: { id?: string; command: string }[]; expanded?: boolean; unfold: boolean; card: boolean }[] = [
+      { name: 'no kane-cli run', calls: [{ id: 't0', command: 'ls' }, { id: 't1', command: 'git status' }], unfold: false, card: false },
+      { name: 'a kane-cli command that is no run', calls: [{ id: 't0', command: 'kane-cli whoami' }], unfold: false, card: false },
+      { name: 'a run command no run came of', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_none', command: CMD }], unfold: false, card: false },
+      { name: 'one run among other calls', calls: [{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }, { id: 't2', command: 'pwd' }], unfold: false, card: true },
+      { name: 'two runs: each row draws its own card', calls: [{ id: 'toolu_1', command: CMD }, { id: 'toolu_2', command: CMD }], unfold: true, card: false },
+      { name: 'a run call without its id: its row draws the card', calls: [{ command: CMD }], unfold: true, card: false },
+      { name: 'a group the person unfolded', calls: [{ id: 'toolu_1', command: CMD }], expanded: true, unfold: true, card: false },
     ]
     for (const c of cases) {
       w.rows.length = 0
-      const g = await $.ui.mount(group(c.commands) as never)
-      expect(w.rows.find(r => r.component === 'ToolGroup')?.isExpanded).toBe(c.want)
+      const g = await $.ui.mount(group(c.calls, { isExpanded: c.expanded ?? false }) as never)
+      expect(await folded(g), c.name).toBe(c.unfold)
+      expect(await g.find({ type: 'Text', text: /^engine ToolGroup$/ }), c.name).toBeDefined()
+      expect((await g.find({ type: 'Text', text: /^✗ failed$/ })) !== undefined, c.name).toBe(c.card)
+      expect((await g.find({ key: 'card-evidence' })) !== undefined, c.name).toBe(c.card)
       await g.unmount()
     }
+    const g = await $.ui.mount(group([{ id: 't0', command: 'ls' }, { id: 'toolu_1', command: CMD }]) as never)
+    await g.press({ key: 'card-evidence' })
+    await w.clock.settle()
+    expect(w.ran.some(a => a.join(' ') === `kane-cli evidence serve ${dir}/evidence/8f0e.evidence`)).toBe(true)
+    await g.unmount()
   })
 
   test('a suite’s card counts its tests and names its failures; its pack is the one its execution id names', async ($, on) => {
