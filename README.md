@@ -98,10 +98,10 @@ People get it with `claude plugin update kane-qe@lambdatest` (or by auto-update)
 
 To list kane-qe in the plugin directory on claude.ai, so anyone can find and enable it:
 
-1. Make sure `claude plugin validate kane-qe --strict` passes, `plugin.json` has `name`, `version`, `description`, `author`, `homepage` and `repository`, and the plugin folder has a `README.md` (all true today).
+1. Make sure `claude plugin validate kane-qe --strict` passes, `plugin.json` has `name`, `version`, `description`, `author`, `homepage`, `repository`, `privacyPolicyUrl` and `termsOfServiceUrl` (the portal shows the last two on the listing), the plugin folder has a `README.md`, and `.claude-plugin/icon.png` is the square icon you want (all true today). The portal takes the icon only the first time the plugin is saved or submitted; changing it later does not change the listing.
 2. Open [claude.ai/directory/manage](https://claude.ai/directory/manage) (a paid plan; for an organization, the Owner role) and follow *Submit a plugin*. The steps are in [Submit a plugin](https://claude.com/docs/plugins/submit).
-3. Anthropic reviews it. Once published, people who enable it on claude.ai get it in Claude Code as `kane-qe@synced`.
-4. For an update: raise `version`, push, and submit the new version in the same portal.
+3. Anthropic reviews it. The portal holds a mod that starts programs, sends data out or submits prompts for a person to clear; the plugin's README says what kane-qe runs and sends (*What this mod runs and sends*). Once published, people who enable it on claude.ai get it in Claude Code as `kane-qe@synced`.
+4. For an update: raise `version` and merge to the branch or tag the submission tracks. The directory picks up the commit, checks it, and publishes it by the plugin's publish setting; nothing is resubmitted.
 
 References: [install plugins](https://code.claude.com/docs/en/plugins/install), [publish](https://code.claude.com/docs/en/plugins/publish), [host a marketplace](https://code.claude.com/docs/en/plugins/host-marketplace), [organization settings](https://code.claude.com/docs/en/plugins/org), [mods reference](https://code.claude.com/docs/en/plugins/mods/reference).
 
@@ -112,9 +112,8 @@ References: [install plugins](https://code.claude.com/docs/en/plugins/install), 
 | `kane-qe/hooks/adapter.ts` | One kane-cli wire line → a small internal event: the only place raw field names appear |
 | `kane-qe/hooks/model.ts` | Pure: events → runs, runs → the band's rows and the pane's text, cover gaps, change helpers |
 | `kane-qe/hooks/sources.ts` | The live-run pointer and byte offsets into event files |
-| `kane-qe/hooks/register.tsx` | Polling, hooks (edits, end of turn, `/kane`, theme) and the drawing |
-| `kane-qe/hooks/mascot.ts` | The mascot: a cell grid in terminals, an image elsewhere |
-| `kane-qe/assets/mascot/` | The mascot's picture frames (PNG), read at session start for surfaces that show images |
+| `kane-qe/hooks/register.tsx` | Polling (runs, and the theme every two seconds), hooks (edits, end of turn, `/kane`) and the drawing |
+| `kane-qe/hooks/mascot.ts` | The mascot's 8×6 pixel poses: a cell grid in terminals, an SVG of the same pixels elsewhere |
 | `kane-qe/tests/` | Adapter table, band states at 60/80/120 columns, recorded kane-cli streams replayed, band and pane on terminal and desktop, change tracking, stale pointers, assurance and use-case detail, remote suites, history, the card in the chat, theme |
 | `.claude-plugin/marketplace.json` | The `lambdatest` marketplace: this repository installs with `/plugin marketplace add` |
 | `docs/` | The Field Guide and the explainer as standalone HTML, with the walkthrough video and screenshots (`guide/build_docs.sh` rebuilds them) |

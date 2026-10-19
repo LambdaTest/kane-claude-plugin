@@ -7,6 +7,8 @@
   },
   "homepage": "https://github.com/LambdaTest/kane-claude-plugin",
   "repository": "https://github.com/LambdaTest/kane-claude-plugin",
+  "privacyPolicyUrl": "https://www.testmuai.com/legal/privacy/",
+  "termsOfServiceUrl": "https://www.testmuai.com/legal/terms-of-service/",
   "license": "MIT",
   "keywords": [
     "kaneai",
@@ -17,7 +19,6 @@
     "browser-testing",
     "e2e"
   ],
-  "types": "./types/index.d.ts",
   "userConfig": {
     "afterChange": {
       "type": "string",

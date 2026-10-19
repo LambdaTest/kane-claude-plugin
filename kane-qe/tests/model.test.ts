@@ -29,7 +29,8 @@ import {
   tidyStep,
   isTrackedEdit,
 } from '../hooks/model'
-import { mascotSvg, setPicture } from '../hooks/mascot'
+import { MASCOT, mascotSvg, pixelFrame } from '../hooks/mascot'
+import type { Pose } from '../hooks/mascot'
 import type { BandOptions } from '../hooks/model'
 import type { Assurance, HistoryEntry, Kind, Run } from '../types'
 import { runFailed, runPassed, testmdPassed, testrunFailed, testrunPassed, testrunPassedMember } from './fixtures/fixtures'
@@ -278,10 +279,21 @@ describe('the card in the chat', () => {
     for (const [text, want] of cases) expect(firstLine(text), JSON.stringify(text)).toBe(want)
   })
 
-  test('the mascot as a picture: the vector stand-in alone until its frame is read, then the frame', () => {
-    expect(mascotSvg('xh')).not.toContain('<image')
-    setPicture('xh', 'AAAA')
-    expect(mascotSvg('xh')).toContain('data:image/png;base64,AAAA')
+  test('the mascot as a picture is its pixel frame: one square per coloured pixel, no image file or embedded data', () => {
+    const cases: { pose: Pose; frame: Pose }[] = [
+      { pose: 'c', frame: 'c' },
+      { pose: 'lm', frame: 'l' },
+      { pose: 'x', frame: 'x' },
+    ]
+    for (const c of cases) {
+      const svg = mascotSvg(c.pose)
+      const coloured = pixelFrame(c.frame).join('').split('').filter(k => k in MASCOT.palette).length
+      expect(svg.match(/<rect /g)?.length, c.pose).toBe(coloured)
+      expect(svg, c.pose).not.toMatch(/<image|base64|href/)
+    }
+    // The open eyes are white; a blink draws them grey.
+    expect(mascotSvg('c')).toContain('fill="#ffffff"')
+    expect(mascotSvg('x')).not.toContain('fill="#ffffff"')
   })
 
   test('a suite’s card names three failures at most, newest first, then how many more', () => {

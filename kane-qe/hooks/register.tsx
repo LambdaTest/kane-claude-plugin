@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, POSES, RASTER, STEP_MS, mascotSvg, setPicture, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
+import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -96,6 +96,9 @@ const sites = new Set<string>()
 /** Sites that draw the running-step spinner: repainted in place with the mascot. */
 const spinSites = new Set<string>()
 let frame = 0
+/** The palette drawn now, and how often Claude Code's theme is read again. */
+let palette: 'light' | 'dark' | undefined
+const THEME_MS = 2000
 let thinking = false
 let remote = false
 
@@ -860,9 +863,12 @@ async function recent($: EngineInterface): Promise<Record<string, HistoryEntry[]
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, HistoryEntry[]>) : {}
 }
 
+/** Reads Claude Code's theme, and redraws when it moved between light and dark. */
 async function readTheme($: EngineInterface) {
   const row = (await $.config.list()).find(r => r.key === 'theme')
-  usePalette(row?.value)
+  const next = usePalette(row?.value)
+  if (next === palette) return
+  palette = next
   await update($, tickAtom, n => n + 1)
 }
 
@@ -985,11 +991,6 @@ async function holdForChange($: EngineInterface, e: { stop_hook_active?: boolean
   return autoInstruction(change.files, savedTestsFor(change.files, tests), startUrl(tests))
 }
 
-async function themeChanged($: EngineInterface, theme: unknown) {
-  usePalette(theme)
-  await update($, tickAtom, n => n + 1)
-}
-
 // ── actions ──────────────────────────────────────────────────────────────
 
 async function act($: EngineInterface, a: string) {
@@ -1039,15 +1040,6 @@ async function act($: EngineInterface, a: string) {
   }
 }
 
-/** Reads the mascot's pictures from the plugin's own files, for surfaces that draw it as an image, then redraws. */
-async function loadPictures($: EngineInterface) {
-  for (const pose of POSES) {
-    const { base64 } = await $.fs.read(`${$.plugin.root}/assets/mascot/${pose}.png`, { as: 'bytes' })
-    setPicture(pose, base64)
-  }
-  await update($, tickAtom, n => n + 1)
-}
-
 // ── the mascot's animation ───────────────────────────────────────────────
 
 /** Where the mascot is an image, step its frame by redrawing the sites that show it. */
@@ -1090,6 +1082,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     projectDir = String((e as { cwd?: unknown }).cwd ?? '').replace(/\/$/, '')
+    palette = undefined
     const home = await $.env.get('HOME').catch(() => undefined)
     if (home) activeDir = `${home}/.testmuai/kaneai/sessions/active`
     await $.command.register({ name: 'kane', description: 'Kane: open the runs pane; /kane assurance; /kane history; /kane auto | ask | off for changes', argumentHint: '[assurance | history | auto | ask | off]' })
@@ -1098,15 +1091,10 @@ export const register: Register = (on, options) => {
     $.clock.every(STEP_MS, () => void pulse($).catch(() => undefined))
     void loadLast($).catch(() => undefined)
     void refreshAssurance($).catch(() => undefined)
+    // The palette follows Claude Code's theme, read every two seconds: the design's colours are for dark backgrounds.
+    $.clock.every(THEME_MS, () => void readTheme($).catch(() => undefined))
     void readTheme($).catch(() => undefined)
-    void loadPictures($).catch(() => undefined)
     return started
-  })
-
-  // The palette follows Claude Code's theme: the design's colours are for dark backgrounds.
-  on('config.set', { key: 'theme' }, async ($, e, next) => {
-    void themeChanged($, e.value).catch(() => undefined)
-    return next(e)
   })
 
   on('command.run', { command: 'kane' }, async ($, e) => {

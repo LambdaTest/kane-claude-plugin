@@ -1,8 +1,8 @@
 // The kane mascot, in the design of LambdaTest/kane-cli#202: the helmet whose eyes glance left, then right, then blink.
 //
-// Two drawings of the same poses:
-//  - PNG: frames cut from that pull request's dark-theme GIF, shrunk to band size, for surfaces that show images.
-//  - PIXELS: an 8 by 6 pixel version for a terminal's cell grid (one cell holds two pixel rows, so three rows tall).
+// One drawing, an 8 by 6 pixel version of each pose (PIXELS), shown two ways:
+//  - a terminal's cell grid (one cell holds two pixel rows, so three rows tall);
+//  - an SVG of one square per pixel, for surfaces that show images.
 
 export type Pose = 'c' | 'lm' | 'l' | 'rm' | 'r' | 'xh' | 'x'
 export type Frame = readonly string[]
@@ -126,45 +126,22 @@ export function spinnerCells(n: number, color: string): string {
 
 export const RASTER = { columns: MASCOT.width, rows: MASCOT.height / 2 } as const
 
-export const PICTURE = { width: 50, height: 44 } as const
-const PNG_W = 99
-const PNG_H = 88
-/** The poses that have a picture, each shipped as `assets/mascot/<pose>.png`. */
-export const POSES: readonly Pose[] = ['c', 'lm', 'l', 'rm', 'r', 'xh', 'x']
-/** The picture frames as base64 PNG, once read from the plugin's files. */
-const PNG: Partial<Record<Pose, string>> = {}
-/** Keeps a pose's picture, read from its file. */
-export function setPicture(pose: Pose, base64: string) {
-  PNG[pose] = base64
-}
+/** The mascot's size where it is drawn as a picture: its 8 by 6 pixels, six units each. */
+export const PICTURE = { width: MASCOT.width * 6, height: MASCOT.height * 6 } as const
 
-
-const EYE_DX: Record<Pose, number> = { c: 0, lm: -3, l: -6, rm: 3, r: 6, xh: 0, x: 0 }
-
-/** A plain vector stand-in, drawn small behind the picture: it shows until the picture is read, or if a surface drops the embedded image. */
-function standIn(dx: number): string {
-  return `<g transform="translate(13 12) scale(0.76)">` +
-    `<defs><linearGradient id="s" x1="0.1" y1="0.05" x2="0.9" y2="0.95"><stop offset="0" stop-color="#d6c4ff"/><stop offset="0.5" stop-color="#a48cfa"/><stop offset="1" stop-color="#6f7cf2"/></linearGradient>` +
-    `<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a2a36"/><stop offset="1" stop-color="#0d0d14"/></linearGradient></defs>` +
-    `<rect x="25" y="9" width="15" height="18" rx="4.5" transform="rotate(-9 32 15)" fill="url(#s) #b79cff"/>` +
-    `<rect x="56" y="9" width="15" height="18" rx="4.5" transform="rotate(9 64 15)" fill="url(#s) #a48cfa"/>` +
-    `<rect x="6" y="38" width="10" height="24" rx="5" fill="#9f8bf8"/><rect x="80" y="38" width="10" height="24" rx="5" fill="#6f7cf2"/>` +
-    `<ellipse cx="48" cy="50" rx="37" ry="35" fill="url(#s) #a48cfa"/>` +
-    `<rect x="14" y="29" width="68" height="36" rx="15" fill="url(#v) #14121c"/>` +
-    `<ellipse cx="48" cy="68" rx="13" ry="6.5" fill="#8e86f6"/>` +
-    `<path d="M21 39 Q18.5 47 21.5 56" stroke="#ffffff" stroke-opacity="0.4" stroke-width="2.4" fill="none" stroke-linecap="round"/>` +
-    `<g transform="translate(${dx} 0)"><rect x="27" y="42" width="18" height="10" rx="5" fill="#cdb8ff" fill-opacity="0.35"/><rect x="51" y="42" width="18" height="10" rx="5" fill="#cdb8ff" fill-opacity="0.35"/>` +
-    `<rect x="29" y="44" width="14" height="6" rx="3" fill="#ffffff"/><rect x="53" y="44" width="14" height="6" rx="3" fill="#ffffff"/></g></g>`
-}
-
-/** The mascot for surfaces that show images: the picture for a pose, as an SVG; the vector stand-in alone until the picture is read. */
+/** The mascot for surfaces that show images: the pose's pixel frame, one square per pixel, as an SVG. */
 export function mascotSvg(pose: Pose): string {
-  const png = PNG[pose]
-  const data = png === undefined ? undefined : `data:image/png;base64,${png}`
+  const frame = pixelFrame(pose)
+  const cells: string[] = []
+  frame.forEach((row, y) => {
+    ;[...row].forEach((key, x) => {
+      const fill = MASCOT.palette[key]
+      if (fill !== undefined) cells.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${fill}"/>`)
+    })
+  })
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${PICTURE.width}" height="${PICTURE.height}" viewBox="0 0 ${PNG_W} ${PNG_H}">` +
-    standIn(EYE_DX[pose]) +
-    (data === undefined ? '' : `<image href="${data}" xlink:href="${data}" x="0" y="0" width="${PNG_W}" height="${PNG_H}"/>`) +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${PICTURE.width}" height="${PICTURE.height}" viewBox="0 0 ${MASCOT.width} ${MASCOT.height}" shape-rendering="crispEdges">` +
+    cells.join('') +
     `</svg>`
   )
 }

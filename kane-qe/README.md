@@ -61,7 +61,7 @@ The mod makes no network requests of its own. It reads files on this machine, st
 
 `kane-cli` here is the *kane-cli command* setting (default `kane-cli`), split on spaces. What kane-cli itself does is kane-cli's, as its own documentation describes.
 
-**What it reads**: kane-cli's live-run pointers and event streams under `~/.testmuai/kaneai/sessions/`, the project's `.testmuai/` folder (saved tests, variables, evidence packs), Claude Code's theme setting, `HOME`, and its own pictures in `assets/mascot/`. It keeps the last 30 results per project in its own store, on this machine.
+**What it reads**: kane-cli's live-run pointers and event streams under `~/.testmuai/kaneai/sessions/`, the project's `.testmuai/` folder (saved tests, variables, evidence packs), Claude Code's theme setting, `HOME`. It keeps the last 30 results per project in its own store, on this machine.
 
 **What it hands to Claude**, and so to the model this Claude Code session uses:
 
@@ -74,7 +74,7 @@ The mod makes no network requests of its own. It reads files on this machine, st
   - *View evidence*, when no viewer could be started: `Open the evidence for the kane-cli run in <path>.`
 - **In auto mode only**: when Claude's turn ends with untested changes, the mod asks Claude once to test them, naming the changed files and the saved tests that match.
 
-**What it never does**: start a test by itself, change Claude Code's settings or permissions, or answer a permission prompt. Its theme hook only reads the new theme and passes the change on unchanged.
+**What it never does**: start a test by itself, change Claude Code's settings or permissions, or answer a permission prompt. It hooks no setting: it reads Claude Code's theme every two seconds to match its colours.
 
 ## Develop
 
@@ -84,6 +84,6 @@ claude plugin test kane-qe          # adapter table, band states at 60/80/120 co
 node kane-qe/tests/fixtures/build.mjs   # after adding a recorded stream to tests/fixtures/*.ndjson
 ```
 
-Layout: `hooks/adapter.ts` (wire line → internal event, the only place raw field names appear), `hooks/model.ts` (pure: events → runs, runs → band rows and pane text), `hooks/sources.ts` (pointer and byte-offset helpers), `hooks/register.tsx` (polling, hooks and drawing), `hooks/mascot.ts` (the mascot, as designed but for its speed), `assets/mascot/*.png` (the mascot's picture frames, read at session start for surfaces that show images).
+Layout: `hooks/adapter.ts` (wire line → internal event, the only place raw field names appear), `hooks/model.ts` (pure: events → runs, runs → band rows and pane text), `hooks/sources.ts` (pointer and byte-offset helpers), `hooks/register.tsx` (polling, hooks and drawing), `hooks/mascot.ts` (the mascot's 8×6 pixel poses: a cell grid in terminals, an SVG of the same pixels elsewhere).
 
 v1 (the cockpit that starts runs, with Insights, Tests, History and Setup tabs and model tools) is on the `main` branch.
