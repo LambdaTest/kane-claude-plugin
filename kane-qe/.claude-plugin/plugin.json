@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "description": "Watches kane-cli (KaneAI) runs in Claude Code: a band above the prompt with the kane mascot, a pane for runs, steps, failures and assurance coverage, and a nudge to test what Claude just changed",
   "author": {
-    "name": "Siraj K"
+    "name": "TestMu AI"
   },
   "homepage": "https://github.com/LambdaTest/kane-claude-plugin",
   "repository": "https://github.com/LambdaTest/kane-claude-plugin",

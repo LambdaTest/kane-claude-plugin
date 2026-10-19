@@ -1,10 +1,10 @@
 {
   "name": "lambdatest",
   "owner": {
-    "name": "LambdaTest"
+    "name": "TestMu AI"
   },
   "metadata": {
-    "description": "LambdaTest plugins for Claude Code"
+    "description": "TestMu AI plugins for Claude Code"
   },
   "plugins": [
     {
