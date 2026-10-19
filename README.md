@@ -98,10 +98,10 @@ People get it with `claude plugin update kane-qe@lambdatest` (or by auto-update)
 
 To list kane-qe in the plugin directory on claude.ai, so anyone can find and enable it:
 
-1. Make sure `claude plugin validate kane-qe --strict` passes, `plugin.json` has `name`, `version`, `description`, `author`, `homepage` and `repository`, and the plugin folder has a `README.md` (all true today).
+1. Make sure `claude plugin validate kane-qe --strict` passes, `plugin.json` has `name`, `version`, `description`, `author`, `homepage` and `repository`, the plugin folder has a `README.md`, and `.claude-plugin/icon.png` is the square icon you want (all true today). The portal takes the icon only the first time the plugin is saved or submitted; changing it later does not change the listing.
 2. Open [claude.ai/directory/manage](https://claude.ai/directory/manage) (a paid plan; for an organization, the Owner role) and follow *Submit a plugin*. The steps are in [Submit a plugin](https://claude.com/docs/plugins/submit).
-3. Anthropic reviews it. Once published, people who enable it on claude.ai get it in Claude Code as `kane-qe@synced`.
-4. For an update: raise `version`, push, and submit the new version in the same portal.
+3. Anthropic reviews it. The portal holds a mod that starts programs, sends data out or submits prompts for a person to clear; the plugin's README says what kane-qe runs and sends (*What this mod runs and sends*). Once published, people who enable it on claude.ai get it in Claude Code as `kane-qe@synced`.
+4. For an update: raise `version` and merge to the branch or tag the submission tracks. The directory picks up the commit, checks it, and publishes it by the plugin's publish setting; nothing is resubmitted.
 
 References: [install plugins](https://code.claude.com/docs/en/plugins/install), [publish](https://code.claude.com/docs/en/plugins/publish), [host a marketplace](https://code.claude.com/docs/en/plugins/host-marketplace), [organization settings](https://code.claude.com/docs/en/plugins/org), [mods reference](https://code.claude.com/docs/en/plugins/mods/reference).
 
