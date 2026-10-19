@@ -49,9 +49,6 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
   })
   on('fs.read', ($, e) => {
     state.reads.push(e.path)
-    // The mascot's pictures, shipped with the plugin.
-    const picture = e.path.match(/\/assets\/mascot\/(\w+)\.png$/)
-    if (picture) return { value: { base64: `png-${picture[1]}` } } as never
     return (e.path in state.files ? { value: state.files[e.path] } : { deny: 'ENOENT' }) as never
   })
   on('fs.stat', ($, e) => (e.path in state.files ? { value: { kind: 'file', size: state.files[e.path]!.length, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
@@ -116,10 +113,10 @@ describe('drawing', () => {
       expect(await ui.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       await ui.unmount()
     }
-    // The mascot's pictures are the plugin's own files, read once the session starts, and drawn where the mascot is an image.
-    expect(w.reads.filter(p => /\/assets\/mascot\/\w+\.png$/.test(p)).length).toBe(7)
+    // Where the mascot is a picture it is drawn from its pixels: the plugin reads no image file.
+    expect(w.reads.filter(p => /\.(png|jpe?g|gif|webp)$/.test(p))).toEqual([])
     const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-    expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('data:image/png;base64,png-c')
+    expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('<rect ')
     await desktop.unmount()
   })
 

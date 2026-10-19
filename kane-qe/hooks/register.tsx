@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, POSES, RASTER, STEP_MS, mascotSvg, setPicture, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
+import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -1040,15 +1040,6 @@ async function act($: EngineInterface, a: string) {
   }
 }
 
-/** Reads the mascot's pictures from the plugin's own files, for surfaces that draw it as an image, then redraws. */
-async function loadPictures($: EngineInterface) {
-  for (const pose of POSES) {
-    const { base64 } = await $.fs.read(`${$.plugin.root}/assets/mascot/${pose}.png`, { as: 'bytes' })
-    setPicture(pose, base64)
-  }
-  await update($, tickAtom, n => n + 1)
-}
-
 // ── the mascot's animation ───────────────────────────────────────────────
 
 /** Where the mascot is an image, step its frame by redrawing the sites that show it. */
@@ -1103,7 +1094,6 @@ export const register: Register = (on, options) => {
     // The palette follows Claude Code's theme, read every two seconds: the design's colours are for dark backgrounds.
     $.clock.every(THEME_MS, () => void readTheme($).catch(() => undefined))
     void readTheme($).catch(() => undefined)
-    void loadPictures($).catch(() => undefined)
     return started
   })
 
