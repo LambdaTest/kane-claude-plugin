@@ -112,7 +112,7 @@ References: [install plugins](https://code.claude.com/docs/en/plugins/install), 
 | `kane-qe/hooks/adapter.ts` | One kane-cli wire line → a small internal event: the only place raw field names appear |
 | `kane-qe/hooks/model.ts` | Pure: events → runs, runs → the band's rows and the pane's text, cover gaps, change helpers |
 | `kane-qe/hooks/sources.ts` | The live-run pointer and byte offsets into event files |
-| `kane-qe/hooks/register.tsx` | Polling, hooks (edits, end of turn, `/kane`, theme) and the drawing |
+| `kane-qe/hooks/register.tsx` | Polling (runs, and the theme every two seconds), hooks (edits, end of turn, `/kane`) and the drawing |
 | `kane-qe/hooks/mascot.ts` | The mascot: a cell grid in terminals, an image elsewhere |
 | `kane-qe/assets/mascot/` | The mascot's picture frames (PNG), read at session start for surfaces that show images |
 | `kane-qe/tests/` | Adapter table, band states at 60/80/120 columns, recorded kane-cli streams replayed, band and pane on terminal and desktop, change tracking, stale pointers, assurance and use-case detail, remote suites, history, the card in the chat, theme |

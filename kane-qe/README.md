@@ -74,7 +74,7 @@ The mod makes no network requests of its own. It reads files on this machine, st
   - *View evidence*, when no viewer could be started: `Open the evidence for the kane-cli run in <path>.`
 - **In auto mode only**: when Claude's turn ends with untested changes, the mod asks Claude once to test them, naming the changed files and the saved tests that match.
 
-**What it never does**: start a test by itself, change Claude Code's settings or permissions, or answer a permission prompt. Its theme hook only reads the new theme and passes the change on unchanged.
+**What it never does**: start a test by itself, change Claude Code's settings or permissions, or answer a permission prompt. It hooks no setting: it reads Claude Code's theme every two seconds to match its colours.
 
 ## Develop
 
