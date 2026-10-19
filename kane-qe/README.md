@@ -2,6 +2,14 @@
 
 A Claude Code mod that shows what kane-cli (KaneAI) is doing, without being asked. Claude runs kane-cli; the mod reads what kane-cli leaves on disk and shows it. The mod never starts a test by itself.
 
+## Install
+
+```
+/plugin install kane-qe --marketplace LambdaTest/kane-claude-plugin
+```
+
+It needs kane-cli installed and logged in (`npm install -g @testmuai/kane-cli`, then `kane-cli login --oauth`).
+
 ## What you see
 
 | Surface | What it shows |
@@ -34,6 +42,40 @@ A Claude Code mod that shows what kane-cli (KaneAI) is doing, without being aske
 - Assurance: `kane-cli cover gaps --json` at session start and after each run, when the project has a `.context` folder. Each use case keeps up to 20 of its `pending` rows (title, why, risk, stage, `ready_command`) for its detail view; its counts cover them all.
 - The last 30 results per project are kept in the mod's store (`recentByProject`, apart from v1's `history`) for `last run …` and the History tab. Entries kept by earlier versions (label, status and time only) still read.
 
+## What this mod runs and sends
+
+The mod makes no network requests of its own. It reads files on this machine, starts the local programs below, and hands text to Claude in this conversation.
+
+**Programs it starts** (each with a fixed argument list; `<pid>`, `<path>` and `<url>` are filled in from kane-cli's own files):
+
+| Command | When | Why |
+|---|---|---|
+| `kill -0 <pid>` | once a second while a run is live | to tell whether a kane-cli run is still going |
+| `ps -o args= -p <pid>` | once per run nobody started in this chat | to name the run from its command line |
+| `tail -c +<offset> <events file>` | while a run is live | to read only the new lines of kane-cli's event stream |
+| `git check-ignore -q <path>` | after Claude edits a file | to skip git-ignored files when deciding what changed |
+| `git diff -- <changed files>` | only when you ask for a drafted objective | to show Claude the change it should test |
+| `kane-cli cover gaps --json` | at session start and after each run, when the project has a `.context` folder | to read assurance coverage (read-only, no credits) |
+| `kane-cli evidence serve <pack>` | only when you press *View evidence* | kane-cli's own evidence viewer, served on this machine |
+| `open <url>`, else `xdg-open <url>` | right after that | to open the viewer's local link in your browser |
+
+`kane-cli` here is the *kane-cli command* setting (default `kane-cli`), split on spaces. What kane-cli itself does is kane-cli's, as its own documentation describes.
+
+**What it reads**: kane-cli's live-run pointers and event streams under `~/.testmuai/kaneai/sessions/`, the project's `.testmuai/` folder (saved tests, variables, evidence packs), Claude Code's theme setting, `HOME`, and its own pictures in `assets/mascot/`. It keeps the last 30 results per project in its own store, on this machine.
+
+**What it hands to Claude**, and so to the model this Claude Code session uses:
+
+- **A drafted objective**: when you press *Draft a new objective*, the list of changed files and their `git diff` (up to 8,000 characters) go to Claude in a side request, which replies with one test objective.
+- **Prompts it submits on a button press**, each shown in the conversation as your message:
+  - *Run it*: `Test my last change with the saved kane-cli test: kane-cli testmd run .testmuai/tests/<test> … --agent --headless. Then report the result.`
+  - *Run the objective*: `Test my last change with kane-cli: kane-cli run "<objective>" … --agent --headless. Then report the result.`
+  - *Close these gaps with Claude*: `Close the assurance gaps of kane-cli use case <id> …`
+  - *Set it up with Claude*: `Set up kane-cli assurance for this project …`
+  - *View evidence*, when no viewer could be started: `Open the evidence for the kane-cli run in <path>.`
+- **In auto mode only**: when Claude's turn ends with untested changes, the mod asks Claude once to test them, naming the changed files and the saved tests that match.
+
+**What it never does**: start a test by itself, change Claude Code's settings or permissions, or answer a permission prompt. Its theme hook only reads the new theme and passes the change on unchanged.
+
 ## Develop
 
 ```
@@ -42,6 +84,6 @@ claude plugin test kane-qe          # adapter table, band states at 60/80/120 co
 node kane-qe/tests/fixtures/build.mjs   # after adding a recorded stream to tests/fixtures/*.ndjson
 ```
 
-Layout: `hooks/adapter.ts` (wire line → internal event, the only place raw field names appear), `hooks/model.ts` (pure: events → runs, runs → band rows and pane text), `hooks/sources.ts` (pointer and byte-offset helpers), `hooks/register.tsx` (polling, hooks and drawing), `hooks/mascot.ts` (the mascot, as designed but for its speed).
+Layout: `hooks/adapter.ts` (wire line → internal event, the only place raw field names appear), `hooks/model.ts` (pure: events → runs, runs → band rows and pane text), `hooks/sources.ts` (pointer and byte-offset helpers), `hooks/register.tsx` (polling, hooks and drawing), `hooks/mascot.ts` (the mascot, as designed but for its speed), `assets/mascot/*.png` (the mascot's picture frames, read at session start for surfaces that show images).
 
 v1 (the cockpit that starts runs, with Insights, Tests, History and Setup tabs and model tools) is on the `main` branch.
