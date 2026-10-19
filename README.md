@@ -114,6 +114,7 @@ References: [install plugins](https://code.claude.com/docs/en/plugins/install), 
 | `kane-qe/hooks/sources.ts` | The live-run pointer and byte offsets into event files |
 | `kane-qe/hooks/register.tsx` | Polling, hooks (edits, end of turn, `/kane`, theme) and the drawing |
 | `kane-qe/hooks/mascot.ts` | The mascot: a cell grid in terminals, an image elsewhere |
+| `kane-qe/assets/mascot/` | The mascot's picture frames (PNG), read at session start for surfaces that show images |
 | `kane-qe/tests/` | Adapter table, band states at 60/80/120 columns, recorded kane-cli streams replayed, band and pane on terminal and desktop, change tracking, stale pointers, assurance and use-case detail, remote suites, history, the card in the chat, theme |
 | `.claude-plugin/marketplace.json` | The `lambdatest` marketplace: this repository installs with `/plugin marketplace add` |
 | `docs/` | The Field Guide and the explainer as standalone HTML, with the walkthrough video and screenshots (`guide/build_docs.sh` rebuilds them) |

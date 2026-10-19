@@ -7,7 +7,7 @@ import type { AfterChange, Assurance, Change, HistoryEntry, Kind, Offer, Run, St
 import { adapt, splitLines } from './adapter'
 import type { Ev } from './adapter'
 import { RANK } from './adapter'
-import { PICTURE, RASTER, STEP_MS, mascotSvg, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
+import { PICTURE, POSES, RASTER, STEP_MS, mascotSvg, setPicture, pixelFrame, poseAt, rasterCells, spinnerCells, spinnerGlyph } from './mascot'
 import {
   C,
   HISTORY_MAX,
@@ -914,7 +914,7 @@ async function openOffer($: EngineInterface) {
   const history = (await recent($))[projectDir] ?? []
   const last: Record<string, HistoryEntry> = {}
   for (const t of tests) {
-    const hit = history.find(h => h.label === t.name || h.label.endsWith(`/${t.name}`))
+    const hit = history.find(entry => entry.label === t.name || entry.label.endsWith(`/${t.name}`))
     if (hit) last[t.name] = hit
   }
   const saved = savedTestsFor(files, tests, last)
@@ -1039,6 +1039,15 @@ async function act($: EngineInterface, a: string) {
   }
 }
 
+/** Reads the mascot's pictures from the plugin's own files, for surfaces that draw it as an image, then redraws. */
+async function loadPictures($: EngineInterface) {
+  for (const pose of POSES) {
+    const { base64 } = await $.fs.read(`${$.plugin.root}/assets/mascot/${pose}.png`, { as: 'bytes' })
+    setPicture(pose, base64)
+  }
+  await update($, tickAtom, n => n + 1)
+}
+
 // ── the mascot's animation ───────────────────────────────────────────────
 
 /** Where the mascot is an image, step its frame by redrawing the sites that show it. */
@@ -1090,14 +1099,14 @@ export const register: Register = (on, options) => {
     void loadLast($).catch(() => undefined)
     void refreshAssurance($).catch(() => undefined)
     void readTheme($).catch(() => undefined)
+    void loadPictures($).catch(() => undefined)
     return started
   })
 
   // The palette follows Claude Code's theme: the design's colours are for dark backgrounds.
   on('config.set', { key: 'theme' }, async ($, e, next) => {
-    const result = await next(e)
-    if (!result.deny) await themeChanged($, e.value).catch(() => undefined)
-    return result
+    void themeChanged($, e.value).catch(() => undefined)
+    return next(e)
   })
 
   on('command.run', { command: 'kane' }, async ($, e) => {

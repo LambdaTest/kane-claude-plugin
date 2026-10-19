@@ -24,11 +24,11 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; reads: string[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
-  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], rows: [], ignored: new Set(), ...w }
+  const state: World = { files: {}, alive: new Set(), prompts: [], ran: [], reads: [], rows: [], ignored: new Set(), ...w }
   const clock = mock.clock(on, { now: T0 })
   mock.store(on, state.store)
   mock.env(on, { HOME })
@@ -47,7 +47,13 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
     const names = Object.keys(state.files).filter(f => f.startsWith(dir) && !f.slice(dir.length).includes('/'))
     return { value: names.map(f => ({ name: f.slice(dir.length), kind: 'file', size: state.files[f]!.length, mtimeMs: 0, isLink: false })) } as never
   })
-  on('fs.read', ($, e) => (e.path in state.files ? { value: state.files[e.path] } : { deny: 'ENOENT' }) as never)
+  on('fs.read', ($, e) => {
+    state.reads.push(e.path)
+    // The mascot's pictures, shipped with the plugin.
+    const picture = e.path.match(/\/assets\/mascot\/(\w+)\.png$/)
+    if (picture) return { value: { base64: `png-${picture[1]}` } } as never
+    return (e.path in state.files ? { value: state.files[e.path] } : { deny: 'ENOENT' }) as never
+  })
   on('fs.stat', ($, e) => (e.path in state.files ? { value: { kind: 'file', size: state.files[e.path]!.length, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
   on('process.run', ($, e) => {
     const argv = e.argv
@@ -110,6 +116,11 @@ describe('drawing', () => {
       expect(await ui.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       await ui.unmount()
     }
+    // The mascot's pictures are the plugin's own files, read once the session starts, and drawn where the mascot is an image.
+    expect(w.reads.filter(p => /\/assets\/mascot\/\w+\.png$/.test(p)).length).toBe(7)
+    const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('data:image/png;base64,png-c')
+    await desktop.unmount()
   })
 
   test('colours follow Claude Code’s theme: the design’s palette on dark, a darker one on light', async ($, on) => {
