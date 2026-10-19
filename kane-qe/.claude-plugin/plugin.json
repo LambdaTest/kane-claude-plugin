@@ -17,7 +17,6 @@
     "browser-testing",
     "e2e"
   ],
-  "types": "./types/index.d.ts",
   "userConfig": {
     "afterChange": {
       "type": "string",
