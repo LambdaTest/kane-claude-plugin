@@ -9,6 +9,8 @@
   "repository": "https://github.com/LambdaTest/kane-claude-plugin",
   "privacyPolicyUrl": "https://www.testmuai.com/legal/privacy/",
   "termsOfServiceUrl": "https://www.testmuai.com/legal/terms-of-service/",
+  "supportUrl": "https://www.testmuai.com/contact-us/",
+  "documentationUrl": "https://www.testmuai.com/docs/kane-cli-claude-code-plugin",
   "license": "MIT",
   "keywords": [
     "kaneai",
