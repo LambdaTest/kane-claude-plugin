@@ -7,6 +7,7 @@
   },
   "homepage": "https://github.com/LambdaTest/kane-claude-plugin",
   "repository": "https://github.com/LambdaTest/kane-claude-plugin",
+  "documentationUrl": "https://www.testmuai.com/docs/kane-cli-claude-code-plugin",
   "privacyPolicyUrl": "https://www.testmuai.com/legal/privacy/",
   "termsOfServiceUrl": "https://www.testmuai.com/legal/terms-of-service/",
   "license": "MIT",

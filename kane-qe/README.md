@@ -8,7 +8,7 @@ A Claude Code mod that shows what kane-cli (KaneAI) is doing, without being aske
 /plugin install kane-qe --marketplace LambdaTest/kane-claude-plugin
 ```
 
-It needs kane-cli installed and logged in (`npm install -g @testmuai/kane-cli`, then `kane-cli login --oauth`).
+The [documentation](https://www.testmuai.com/docs/kane-cli-claude-code-plugin) covers everything below step by step. It needs kane-cli installed and logged in (`npm install -g @testmuai/kane-cli`, then `kane-cli login --oauth`).
 
 ## What you see
 

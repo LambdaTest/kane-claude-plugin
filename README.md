@@ -6,6 +6,8 @@ Claude runs kane-cli; the mod reads what kane-cli leaves on disk and draws it: a
 
 ![The band while a test runs](guide/v2/band-running.png)
 
+**Documentation:** [Kane CLI Plugin for Claude Code](https://www.testmuai.com/docs/kane-cli-claude-code-plugin) on the TestMu AI docs: install, the band, the card in the chat, the pane, testing what Claude changed, assurance, evidence, commands, what it runs and sends, limits and troubleshooting. It is the page the plugin's listing links as its documentation.
+
 **Read more:** the [Field Guide](docs/index.html) (every band state, the pane, flows, use cases, guidelines, and a chaptered walkthrough video recorded with real runs: [docs/kane-qe-v2-tour.mp4](docs/kane-qe-v2-tour.mp4)) and [Explained simply](docs/explainer.html). Both are standalone pages: open them from a clone. [How v2 meets its design](guide/v2/design-coverage.md) lists every designed feature and screen and how it was checked.
 
 ## Install
@@ -98,7 +100,7 @@ People get it with `claude plugin update kane-qe@lambdatest` (or by auto-update)
 
 To list kane-qe in the plugin directory on claude.ai, so anyone can find and enable it:
 
-1. Make sure `claude plugin validate kane-qe --strict` passes, `plugin.json` has `name`, `version`, `description`, `author`, `homepage`, `repository`, `privacyPolicyUrl` and `termsOfServiceUrl` (the portal shows the last two on the listing), the plugin folder has a `README.md`, and `.claude-plugin/icon.png` is the square icon you want (all true today). The portal takes the icon only the first time the plugin is saved or submitted; changing it later does not change the listing.
+1. Make sure `claude plugin validate kane-qe --strict` passes, `plugin.json` has `name`, `version`, `description`, `author`, `homepage`, `repository`, `documentationUrl`, `privacyPolicyUrl` and `termsOfServiceUrl` (the portal shows the last three on the listing), the plugin folder has a `README.md`, and `.claude-plugin/icon.png` is the square icon you want (all true today). The portal takes the icon only the first time the plugin is saved or submitted; changing it later does not change the listing.
 2. Open [claude.ai/directory/manage](https://claude.ai/directory/manage) (a paid plan; for an organization, the Owner role) and follow *Submit a plugin*. The steps are in [Submit a plugin](https://claude.com/docs/plugins/submit).
 3. Anthropic reviews it. The portal holds a mod that starts programs, sends data out or submits prompts for a person to clear; the plugin's README says what kane-qe runs and sends (*What this mod runs and sends*). Once published, people who enable it on claude.ai get it in Claude Code as `kane-qe@synced`.
 4. For an update: raise `version` and merge to the branch or tag the submission tracks. The directory picks up the commit, checks it, and publishes it by the plugin's publish setting; nothing is resubmitted.
