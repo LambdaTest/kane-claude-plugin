@@ -26,7 +26,6 @@ The [documentation](https://www.testmuai.com/docs/kane-cli-claude-code-plugin) c
 | Setting | Default | |
 |---|---|---|
 | After Claude changes code | `offer` | `offer`: the band offers a test. `auto`: Claude is held once at the end of its turn to test the change. `off`: nothing |
-| kane-cli command | `kane-cli` | Used only for `kane-cli cover gaps --json` (read-only, no credits) |
 
 `/kane auto`, `/kane ask`, `/kane off` change it for this session. Colours follow Claude Code's theme (the design's palette on dark, a darker one on light), and every band row fits its width: names are cut first, then items drop from the right, `[ Open ]` stays. `/kane assurance` opens the Assurance tab and `/kane history` the History tab.
 
@@ -59,7 +58,7 @@ The mod makes no network requests of its own. It reads files on this machine, st
 | `kane-cli evidence serve <pack>` | only when you press *View evidence* | kane-cli's own evidence viewer, served on this machine |
 | `open <url>`, else `xdg-open <url>` | right after that | to open the viewer's local link in your browser |
 
-`kane-cli` here is the *kane-cli command* setting (default `kane-cli`), split on spaces. What kane-cli itself does is kane-cli's, as its own documentation describes.
+Every command above is written out in full in the code: the program is always the one named, and only `<pid>`, `<offset>`, `<path>`, `<pack>` and `<url>` are filled in. `kane-cli` is found on your `PATH`. What kane-cli itself does is kane-cli's, as its own documentation describes.
 
 **What it reads**: kane-cli's live-run pointers and event streams under `~/.testmuai/kaneai/sessions/`, the project's `.testmuai/` folder (saved tests, variables, evidence packs), Claude Code's theme setting, `HOME`. It keeps the last 30 results per project in its own store, on this machine.
 
@@ -75,6 +74,18 @@ The mod makes no network requests of its own. It reads files on this machine, st
 - **In auto mode only**: when Claude's turn ends with untested changes, the mod asks Claude once to test them, naming the changed files and the saved tests that match.
 
 **What it never does**: start a test by itself, change Claude Code's settings or permissions, or answer a permission prompt. It hooks no setting: it reads Claude Code's theme every two seconds to match its colours.
+
+## For directory reviewers
+
+How the mod's code answers each point the plugin directory's policy check raises:
+
+| The directory's note | Where in the code | What the mod does |
+|---|---|---|
+| Starts other programs | `hooks/register.tsx`: `alive`, `readNew`, `processLabel`, `ignored`, `draftObjective`, `refreshAssurance`, `startViewer`, `openEvidence` | Only the eight commands in the table above, each a fixed argument list. None is built from the conversation, a setting or a file's contents; only process ids, byte offsets, file paths and the viewer's local link are filled in. |
+| Reads local data / the conversation, and can send data out | `poll`, `readNew`, `savedTests`; the `tool.call` hook | The mod makes no network requests. It reads kane-cli's own files and Claude's tool calls: the commands Claude runs, to recognise `kane-cli` commands and name their runs, and the paths of files Claude edits, to know what changed. What leaves the mod goes to Claude, in this session, as described under *What it hands to Claude*. |
+| Submits prompts that can carry text out | `act`, `openEvidence` | Prompts are submitted only when you press a button, and each one is shown in the conversation as your message. Their full text is listed above. The one exception is opt-in `auto` mode, where the Stop hook asks Claude once to test an untested change. |
+| Takes a permission decision out of the user's hands | `command.run` hook for `/kane` | This hook answers only the mod's own `/kane` command, registered by that literal name; `claude plugin validate` reports it as "answers its own command", not as a gate. It opens the pane's tabs and sets this session's `offer` / `auto` / `off` mode. It never changes a permission, a setting, Remote Control or an agent's permission mode. |
+| Hooks tool calls and the end of a turn | `tool.call`, `classic.Stop` hooks | `tool.call` always passes the call on unchanged with `next(e)`; it only notes kane-cli commands and the files a call changed. `classic.Stop` keeps any block another hook made, and adds one only in opt-in `auto` mode, once per change. |
 
 ## Develop
 

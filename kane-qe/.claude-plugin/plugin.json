@@ -32,12 +32,6 @@
         "off"
       ],
       "default": "offer"
-    },
-    "kaneCommand": {
-      "type": "string",
-      "title": "kane-cli command",
-      "description": "How to launch kane-cli for read-only checks (cover gaps), split on spaces",
-      "default": "kane-cli"
     }
   }
 }
