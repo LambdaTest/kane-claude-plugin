@@ -355,6 +355,7 @@ export function assuranceRow(a: Assurance): Row {
   const head: Span = { t: 'assurance', c: C.yellow }
   if (a.state === 'none') return { items: [head, dim('not set up')], button: { key: 'setup', label: 'Set up now', act: 'tab:assure' } }
   if (a.state === 'unknown') return { items: [head] }
+  if (a.state === 'error') return { items: [head, dim(`unavailable · ${cut(a.message, 40)}`)], button: { key: 'assure-retry', label: 'Retry', act: 'assure-retry' } }
   const cases = `${a.useCases.length} use case${a.useCases.length === 1 ? '' : 's'}`
   if (a.provenPct === undefined) return { items: [head, bar(16, a.designedPct / 100, C.yellow), { t: `${a.designedPct}%`, c: C.yellow, b: true }, dim('designed · nothing run yet')] }
   return { items: [head, bar(16, a.provenPct / 100, C.yellow), { t: `${a.provenPct}%`, c: C.yellow, b: true }, dim(`proven · ${cases}`)] }
@@ -679,20 +680,29 @@ export function historyDetail(h: HistoryEntry): string {
 
 /** The run a Bash command starts, named from its own words: the best label kane-cli's runs can get. */
 export function labelFromCommand(command: string): { label: string; surface: Kind } | undefined {
-  const at = command.search(/\bkane-cli\b/)
-  if (at === -1) return undefined
-  const rest = command.slice(at)
-  const md = rest.match(/\btestmd\s+run\s+(["']?)([^"'\s]+)\1/)
-  if (md) return { label: base(md[2]!), surface: 'testmd' }
-  const suite = rest.match(/\btestrun\s+run\b([^|;&\n]*)/)
-  if (suite) {
-    const flags = (suite[1] ?? '').match(/--(tags|from-context|filter)\s+(\S+)/)
-    return { label: flags ? `suite · --${flags[1]} ${flags[2]}` : 'suite', surface: 'testrun' }
+  for (const m of command.matchAll(INVOKE)) {
+    const sub = m[1]!.split(/\s+/)[0]
+    const rest = command.slice(m.index! + m[0].length)
+    if (sub === 'testmd') {
+      const f = rest.match(FILE)
+      if (f) return { label: base(f[2]!), surface: 'testmd' }
+    } else if (sub === 'testrun') {
+      const flags = (rest.match(/^[^|;&\n]*/)?.[0] ?? '').match(/--(tags|from-context|filter)\s+(\S+)/)
+      return { label: flags ? `suite · --${flags[1]} ${flags[2]}` : 'suite', surface: 'testrun' }
+    } else {
+      const o = rest.match(OBJECTIVE)
+      const label = (o?.[1] !== undefined ? o[1].replace(/\\(["\\$`])/g, '$1') : (o?.[2] ?? '')).trim()
+      if (label) return { label, surface: 'run' }
+    }
   }
-  const run = rest.match(/\brun\s+(["'])([\s\S]*?)\1/)
-  if (run && !/\b(testmd|testrun)\b/.test(rest.slice(0, run.index))) return { label: run[2]!.trim(), surface: 'run' }
   return undefined
 }
+
+/** kane-cli as the program (a path, an npx package, or the dist/index.js `ps` shows), then a test subcommand. */
+const INVOKE = /(?:^|[\s;&|(])(?:\S*\/)?kane-cli(?:\/\S*)?\s+(testmd\s+run|testrun\s+run|run)(?=\s|$)/g
+const FLAGS = String.raw`(?:\s+--?[\w-]+(?:=\S+|\s+(?!["'-])[^\s"']+)?)*?`
+const OBJECTIVE = new RegExp(String.raw`^${FLAGS}\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)')`)
+const FILE = new RegExp(String.raw`^${FLAGS}\s+(["']?)([^"'\s-][^"'\s]*)\1`)
 
 // ── after Claude changes code ────────────────────────────────────────────
 
