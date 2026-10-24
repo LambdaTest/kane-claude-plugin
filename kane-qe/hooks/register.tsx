@@ -78,7 +78,6 @@ function glyphOf(s: Status): [string, string] {
 // ── module state: it starts over on a reload; what must last is in `$.state` / `$.store` ──
 
 let setting: AfterChange = 'offer'
-let kane: string[] = ['kane-cli']
 let projectDir = ''
 let activeDir = ''
 /** One per file being followed: a run's own stream, or a suite member's. */
@@ -770,7 +769,7 @@ function startViewer($: EngineInterface, pack: string): Promise<string | undefin
     void (async () => {
       let text = ''
       try {
-        for await (const piece of $.process.spawn({ argv: [...kane, 'evidence', 'serve', pack], cwd: projectDir })) {
+        for await (const piece of $.process.spawn({ argv: ['kane-cli', 'evidence', 'serve', pack], cwd: projectDir })) {
           text = (text + piece.text).slice(-4000)
           const link = text.match(/viewer\s+(https?:\/\/\S+)/)
           if (link && !viewers.has(pack)) {
@@ -845,7 +844,7 @@ async function refreshAssurance($: EngineInterface) {
     await update($, assuranceAtom, () => ({ state: 'none' }) as Assurance)
     return
   }
-  const r = await $.process.run([...kane, 'cover', 'gaps', '--json'], { cwd: projectDir, timeoutMs: 30_000 }).catch(() => undefined)
+  const r = await $.process.run(['kane-cli', 'cover', 'gaps', '--json'], { cwd: projectDir, timeoutMs: 30_000 }).catch(() => undefined)
   if (!r) return
   if (r.exitCode !== 0 && /no context store/i.test(`${r.stderr}${r.stdout}`)) {
     await update($, assuranceAtom, () => ({ state: 'none' }) as Assurance)
@@ -1076,8 +1075,6 @@ async function chatCardAt($: EngineInterface, e: { requestId: string; surface: R
 export const register: Register = (on, options) => {
   const o = options as Record<string, unknown>
   setting = o.afterChange === 'auto' || o.afterChange === 'off' ? o.afterChange : 'offer'
-  kane = String(o.kaneCommand ?? 'kane-cli').trim().split(/\s+/).filter(Boolean)
-  if (kane.length === 0) kane = ['kane-cli']
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
