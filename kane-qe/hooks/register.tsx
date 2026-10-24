@@ -445,6 +445,18 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: str
   if (a.state === 'unknown') return <ui.Text dimColor>Reading the requirement store…</ui.Text>
   const opened = a.state === 'ready' && open ? a.useCases.find(u => u.id === open) : undefined
   if (opened) return useCaseView(ui, press, opened)
+  if (a.state === 'error') {
+    return (
+      <ui.Box flexDirection="column" borderStyle="round" borderColor={C.coral} paddingX={1}>
+        <ui.Text color={C.coral} bold>
+          Assurance is unavailable
+        </ui.Text>
+        <ui.Text dimColor>{a.message}</ui.Text>
+        <ui.Text> </ui.Text>
+        <ui.Button key="assure-retry" label="Retry" variant="primary" onPress={() => press('assure-retry')} />
+      </ui.Box>
+    )
+  }
   if (a.state === 'none') {
     return (
       <ui.Box flexDirection="column" borderStyle="round" borderColor={C.yellow} paddingX={1}>
@@ -693,9 +705,11 @@ async function poll($: EngineInterface) {
     const present = new Set(listing.map(e => e.name))
     for (const e of listing) {
       if (!e.name.endsWith('.json') || seenPointers.has(e.name)) continue
-      seenPointers.add(e.name)
       const p = parsePointer((await $.fs.read(`${activeDir}/${e.name}`).catch(() => '')) ?? '', now)
-      if (!p || !inside(p.cwd, projectDir) || !(await alive($, p.pid))) continue
+      // Half-written: read it again next time.
+      if (!p) continue
+      seenPointers.add(e.name)
+      if (!inside(p.cwd, projectDir) || !(await alive($, p.pid))) continue
       runs = startWatch(runs, p, e.name, await processLabel($, p.pid))
       changed = true
     }
@@ -845,13 +859,17 @@ async function refreshAssurance($: EngineInterface) {
     return
   }
   const r = await $.process.run(['kane-cli', 'cover', 'gaps', '--json'], { cwd: projectDir, timeoutMs: 30_000 }).catch(() => undefined)
-  if (!r) return
+  if (!r) {
+    await update($, assuranceAtom, () => ({ state: 'error', message: 'kane-cli could not be started: is it installed and on PATH?' }) as Assurance)
+    return
+  }
   if (r.exitCode !== 0 && /no context store/i.test(`${r.stderr}${r.stdout}`)) {
     await update($, assuranceAtom, () => ({ state: 'none' }) as Assurance)
     return
   }
   const a = parseCoverGaps(r.stdout)
-  if (a.state === 'ready') await update($, assuranceAtom, () => a)
+  const why = firstLine(r.stderr) || firstLine(r.stdout) || `kane-cli exited ${r.exitCode}`
+  await update($, assuranceAtom, () => (a.state === 'ready' ? a : ({ state: 'error', message: why } as Assurance)))
 }
 
 /** The last results per project. Its own key: v1 of this plugin kept a list under `history` in the same store. */
@@ -1028,6 +1046,9 @@ async function act($: EngineInterface, a: string) {
     await update($, offerAtom, () => null)
     await update($, changeAtom, c => (c ? { ...c, shown: false } : c))
     await update($, viewAtom, v => ({ ...v, open: '' }))
+  } else if (k === 'assure-retry') {
+    await update($, assuranceAtom, () => ({ state: 'unknown' }) as Assurance)
+    await refreshAssurance($)
   } else if (k === 'evidence') await openEvidence($, arg)
   else if (k === 'steps') {
     await update($, viewAtom, v => ({ ...v, tab: 'runs' as const, open: arg, uc: '' }))

@@ -24,7 +24,7 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; reads: string[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; reads: string[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string>; noKane?: boolean }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
@@ -60,6 +60,7 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
     if (argv[0] === 'kill') return OK('', state.alive.has(Number(argv[2])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'check-ignore') return OK('', state.ignored.has(String(argv[3])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'diff') return OK('+ postcode.trim()') as never
+    if (argv.includes('cover') && state.noKane) return { deny: 'ENOENT' } as never
     if (argv.includes('cover')) return (state.cover ? OK(state.cover) : OK('error: no context store here', 1)) as never
     return OK('', 1) as never
   })
@@ -364,6 +365,22 @@ describe('watching kane-cli', () => {
     await pane.unmount()
   })
 
+  test('a pointer read while kane-cli is still writing it is read again', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    w.alive.add(51)
+    w.files[`${S}/p1/events.ndjson`] = line({ step: 1, status: 'running', remark: 'Step 1' })
+    w.files[`${ACTIVE}/51.json`] = '{"pid":51,"cwd":"'
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    w.files[`${ACTIVE}/51.json`] = JSON.stringify({ pid: 51, cwd: PROJECT, surface: 'run', session_dir: `${S}/p1`, started: at(0) })
+    await w.clock.advance(1500)
+    await w.clock.settle()
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect(await band.find({ type: 'Text', text: /running/ })).toBeDefined()
+    await band.unmount()
+  })
+
   test('a stale pointer and another project’s run are not shown', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
@@ -518,6 +535,34 @@ describe('assurance', () => {
     expect(await pane.find({ type: 'Text', text: /2 failing · 1 blocked · run 2h ago/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /1 stale/ })).toBeDefined()
     await pane.unmount()
+    await band.unmount()
+  })
+
+  test('cover gaps that cannot be read says why, and Retry reads it again', async ($, on) => {
+    const w = world(on, { cover: 'Error: not logged in. Run kane-cli login' })
+    w.files[`${PROJECT}/.context/commits/1`] = 'x'
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.settle()
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect(await band.find({ type: 'Text', text: /unavailable · Error: not logged in/ })).toBeDefined()
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    await pane.press({ key: 'tab-assure' })
+    expect(await pane.find({ type: 'Text', text: /Reading the requirement store/ })).toBeUndefined()
+    w.cover = JSON.stringify({ design_completeness: { pct: 50 }, proven: { pct: 25 }, usecases: [] })
+    await pane.press({ key: 'assure-retry' })
+    await w.clock.settle()
+    expect(await band.find({ type: 'Text', text: /25%/ })).toBeDefined()
+    await pane.unmount()
+    await band.unmount()
+  })
+
+  test('with no kane-cli to start, assurance says so', async ($, on) => {
+    const w = world(on, { noKane: true })
+    w.files[`${PROJECT}/.context/commits/1`] = 'x'
+    await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.settle()
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect(await band.find({ type: 'Text', text: /unavailable · kane-cli could not be started/ })).toBeDefined()
     await band.unmount()
   })
 

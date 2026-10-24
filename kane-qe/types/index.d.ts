@@ -62,6 +62,7 @@ export type UseCase = { id: string; title?: string; risk?: string; designed: num
 export type Assurance =
   | { state: 'unknown' }
   | { state: 'none' }
+  | { state: 'error'; message: string }
   | {
       state: 'ready'
       designedPct: number

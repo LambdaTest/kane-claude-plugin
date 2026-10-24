@@ -147,6 +147,7 @@ describe('the band, state by state, at 60, 80 and 120 columns', () => {
     expect(rows([], { assurance: { state: 'none' } })[2]).toBe('assurance not set up [Set up now]')
     expect(rows([], { assurance: { state: 'ready', designedPct: 82, useCases: [] } })[2]).toBe('assurance ━━━━━━━━━━━━━─── 82% designed · nothing run yet')
     expect(rows([], { assurance: { state: 'unknown' } })[2]).toBe('assurance')
+    expect(rows([], { assurance: { state: 'error', message: 'Error: not logged in' } })[2]).toBe('assurance unavailable · Error: not logged in [Retry]')
   })
 
   test('a newer kane-cli shows the run and says so, nothing else', () => {
@@ -444,6 +445,16 @@ describe('labels, edits and drafts', () => {
     expect(labelFromCommand(`kane-cli run "Add a hoodie to the cart" --agent --headless`)).toEqual({ label: 'Add a hoodie to the cart', surface: 'run' })
     expect(labelFromCommand('kane-cli testrun run --tags smoke --parallel 3')).toEqual({ label: 'suite · --tags smoke', surface: 'testrun' })
     expect(labelFromCommand('npm test')).toBeUndefined()
+  })
+
+  test('only kane-cli itself, running a test, names a run', () => {
+    expect(labelFromCommand('kane-cli --version && npm run "build"')).toBeUndefined()
+    expect(labelFromCommand(`grep -r "kane-cli" . ; pnpm run 'dev'`)).toBeUndefined()
+    expect(labelFromCommand('kane-cli cover gaps --json')).toBeUndefined()
+    expect(labelFromCommand('kane-cli run "Click \\"Login\\" and check"')).toEqual({ label: 'Click "Login" and check', surface: 'run' })
+    expect(labelFromCommand(`kane-cli run --headless 'Sign in'`)).toEqual({ label: 'Sign in', surface: 'run' })
+    expect(labelFromCommand('cd app && npx @testmuai/kane-cli testmd run --agent login_test.md')).toEqual({ label: 'login_test.md', surface: 'testmd' })
+    expect(labelFromCommand('/opt/kane/bin/node /opt/kane/kane-cli/dist/index.js testmd run .testmuai/tests/cart_test.md')).toEqual({ label: 'cart_test.md', surface: 'testmd' })
   })
 
   test('planner noise is dropped from step text', () => {
