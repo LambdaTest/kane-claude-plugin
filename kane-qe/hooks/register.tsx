@@ -21,7 +21,6 @@ import {
   cells,
   cut,
   debt,
-  draftPrompt,
   elapsed,
   firstLine,
   fmt,
@@ -40,7 +39,6 @@ import {
   newRun,
   nm,
   nowText,
-  objectiveFrom,
   onGrid,
   parseCoverGaps,
   ago,
@@ -65,6 +63,8 @@ const offerAtom = atom({ plugin: 'kane-qe', key: 'offer' } as const, null as Off
 const modeAtom = atom({ plugin: 'kane-qe', key: 'mode' } as const, '' as '' | AfterChange)
 const lastAtom = atom({ plugin: 'kane-qe', key: 'last' } as const, null as HistoryEntry | null)
 const historyAtom = atom({ plugin: 'kane-qe', key: 'history' } as const, [] as HistoryEntry[])
+/** The link each evidence viewer this session started printed, by pack: drawn as a link the person clicks. */
+const viewerAtom = atom({ plugin: 'kane-qe', key: 'viewers' } as const, {} as Record<string, string>)
 
 type Kit = Pick<Elements['mobile'], 'Box' | 'Text' | 'Button'>
 type Table = Elements[RenderSurface]
@@ -242,7 +242,16 @@ function stepTime(s: Step, now: number): string {
   return s.endedAt ? fmt((s.endedAt - s.startedAt) / 1000) : ''
 }
 
-function runDetail(ui: Kit, press: Press, r: Run, now: number, width: number) {
+/** The evidence viewer's link: the person clicks it, and their terminal or app opens it. */
+function evidenceLink(ui: Kit, key: string, href: string) {
+  return (
+    <ui.Text key={key} color={C.cyan}>
+      <ui.Link href={href}>Open evidence viewer ↗</ui.Link>
+    </ui.Text>
+  )
+}
+
+function runDetail(ui: Kit, press: Press, r: Run, now: number, width: number, viewer?: string) {
   const tone = r.status === 'failed' ? C.coral : r.status === 'passed' ? C.mint : C.purple
   const ended = r.status === 'passed' || r.status === 'failed'
   const status = [fmt(elapsed(r, now)), r.kind, r.target, ended && r.credits !== undefined ? `${Math.round(r.credits * 10) / 10} credits` : ''].filter(Boolean).join(' · ')
@@ -293,7 +302,7 @@ function runDetail(ui: Kit, press: Press, r: Run, now: number, width: number) {
         )
       })}
       {ended && r.sessionDir ? <ui.Text> </ui.Text> : null}
-      {ended && r.sessionDir ? <ui.Button key="evidence" label="Open evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+      {ended && r.sessionDir ? (viewer ? evidenceLink(ui, 'evidence-link', viewer) : <ui.Button key="evidence" label="Open evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} />) : null}
     </ui.Box>
   )
 }
@@ -301,7 +310,6 @@ function runDetail(ui: Kit, press: Press, r: Run, now: number, width: number) {
 function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null, now: number, width: number) {
   const files = o?.files ?? change?.files ?? []
   const saved = o?.saved ?? []
-  const hasDraft = !!(o && (o.drafting || o.objective || o.note))
   return (
     <ui.Box flexDirection="column">
       <ui.Box flexDirection="row" gap={1}>
@@ -313,13 +321,6 @@ function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null
       {files.slice(0, 8).map((f, i) => fact(ui, i === 0 ? 'changed' : '', f.startsWith(`${projectDir}/`) ? f.slice(projectDir.length + 1) : f))}
       {files.length > 8 ? <ui.Text dimColor>{`        +${files.length - 8} more`}</ui.Text> : null}
       <ui.Text> </ui.Text>
-      {hasDraft ? (
-        <ui.Box flexDirection="column">
-          <ui.Text bold>Suggested objective</ui.Text>
-          {o?.drafting ? <ui.Text dimColor>Claude is drafting one…</ui.Text> : o?.objective ? <ui.Text>{o.objective}</ui.Text> : <ui.Text dimColor>{o?.note ?? ''}</ui.Text>}
-          <ui.Text> </ui.Text>
-        </ui.Box>
-      ) : null}
       {saved.length ? (
         <ui.Box flexDirection="column">
           <ui.Text bold>Saved tests that touch this</ui.Text>
@@ -341,8 +342,7 @@ function offerView(ui: Kit, press: Press, o: Offer | null, change: Change | null
         </ui.Box>
       ) : null}
       <ui.Box flexDirection="row" gap={1}>
-        {o?.objective ? <ui.Button key="offer-run" label="Run the objective" variant="primary" onPress={() => press('offer-run')} /> : null}
-        {!hasDraft ? <ui.Button key="offer-draft" label="Draft a new objective" onPress={() => press('offer-draft')} /> : null}
+        <ui.Button key="offer-new" label="Test with a new objective" variant={saved.length ? undefined : 'primary'} onPress={() => press('offer-new')} />
         <ui.Button key="offer-skip" label="Not now" onPress={() => press('offer-skip')} />
       </ui.Box>
     </ui.Box>
@@ -503,7 +503,7 @@ function assureView(ui: Kit, press: Press, a: Assurance, now: number, open?: str
 }
 
 /** A run Claude started, as a card in the chat in place of its shell row: one line while it runs, then its result. */
-function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean) {
+function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, now: number, columns: number, clickable: boolean, viewer?: string) {
   const ui: Kit = table
   if (r.status === 'running' || r.status === 'pending') {
     const suite = r.kind === 'testrun' && r.members ? cardHeader(r, now, columns).result : undefined
@@ -581,7 +581,7 @@ function chatCard(table: Table, surface: RenderSurface, press: Press, r: Run, no
         <ui.Box flexDirection="row" justifyContent="space-between" gap={2}>
           <ui.Box flexDirection="row" gap={1}>
             {clickable && (isSuite || r.status === 'failed') ? <ui.Button key="card-steps" label={isSuite ? 'View tests' : 'View steps'} onPress={() => press(`steps:${r.id}`)} /> : null}
-            {clickable && r.evidence ? <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} /> : null}
+            {clickable && r.evidence ? (viewer ? evidenceLink(ui, 'card-evidence-link', viewer) : <ui.Button key="card-evidence" label="View evidence" variant="primary" onPress={() => press(`evidence:${r.id}`)} />) : null}
           </ui.Box>
           <ui.Box key="card-verified" flexDirection="row" gap={1} flexShrink={0}>
             {cardFooter().map(s => text(ui, s))}
@@ -774,6 +774,7 @@ function startViewer($: EngineInterface, pack: string): Promise<string | undefin
           const link = text.match(/viewer\s+(https?:\/\/\S+)/)
           if (link && !viewers.has(pack)) {
             viewers.set(pack, link[1]!)
+            await update($, viewerAtom, v => ({ ...v, [pack]: link[1]! }))
             say(link[1])
           }
         }
@@ -781,24 +782,29 @@ function startViewer($: EngineInterface, pack: string): Promise<string | undefin
         // the viewer could not start: the caller falls back
       }
       viewers.delete(pack)
+      await update($, viewerAtom, v => Object.fromEntries(Object.entries(v).filter(([k]) => k !== pack))).catch(() => undefined)
       say(undefined)
     })()
   })
 }
 
-/** One click to a run's evidence: its pack in kane-cli's viewer, in the browser. Without a pack or a viewer, Claude is asked instead. */
+/** A run's evidence: kane-cli's viewer for its pack, shown as a link the person clicks. Without a pack or a viewer, a prompt is filled for Claude instead. */
 async function openEvidence($: EngineInterface, id: string) {
   const all = await read($, runsAtom)
   const r = all.find(x => x.id === id) ?? leaves(all).find(x => x.id === id)
   const pack = r?.evidence
   const url = pack ? (viewers.get(pack) ?? (await startViewer($, pack))) : undefined
   if (url) {
-    const opened = await $.process.run(['open', url], { timeoutMs: 5000 }).catch(() => undefined)
-    if (opened?.exitCode !== 0) await $.process.run(['xdg-open', url], { timeoutMs: 5000 }).catch(() => undefined)
-    $.ui.toast('Evidence opened in the browser')
+    $.ui.toast('Evidence viewer ready: click Open evidence viewer')
     return
   }
-  void $.prompt.submit({ text: `Open the evidence for the kane-cli run in ${pack ?? r?.sessionDir ?? id}.` }).catch(() => undefined)
+  await fill($, `Open the evidence for the kane-cli run in ${pack ?? r?.sessionDir ?? id}.`)
+}
+
+/** Puts a prompt in the prompt box for the person to read and send: the mod never sends one itself. */
+async function fill($: EngineInterface, text: string) {
+  const r = await $.prompt.fill({ text }).catch(() => undefined)
+  $.ui.toast(r?.isFilled ? 'Prompt ready: press Enter to send it to Claude' : 'Could not fill the prompt box')
 }
 
 /** A run nobody started in this chat is named from its own process: the command line kane-cli was started with. */
@@ -923,22 +929,15 @@ async function openOffer($: EngineInterface) {
     if (hit) last[t.name] = hit
   }
   const saved = savedTestsFor(files, tests, last)
-  await update($, offerAtom, () => ({ files, drafting: false, saved, url: startUrl(tests), last }))
-  // A saved test that covers the change comes first; Claude drafts a new objective only when none does.
-  if (saved.length === 0) await draftObjective($)
+  await update($, offerAtom, () => ({ files, saved, url: startUrl(tests), last }))
 }
 
-/** Claude writes the objective from the changed paths and their diff. */
-async function draftObjective($: EngineInterface) {
-  const o = await read($, offerAtom)
-  if (!o) return
-  await update($, offerAtom, x => (x ? { ...x, drafting: true, note: undefined } : x))
-  const rel = o.files.map(f => (f.startsWith(`${projectDir}/`) ? f.slice(projectDir.length + 1) : f))
-  const d = await $.process.run(['git', 'diff', '--', ...rel], { cwd: projectDir, timeoutMs: 10_000 }).catch(() => undefined)
-  const diff = (d?.stdout ?? '').slice(0, 8000)
-  const reply = await $.model.fork({ prompt: draftPrompt(rel, diff) }).catch(() => undefined)
-  const objective = reply?.isAnswered ? objectiveFrom(reply.text) : ''
-  await update($, offerAtom, x => (x ? { ...x, drafting: false, objective: objective || undefined, note: objective ? undefined : `No draft: ${reply && !reply.isAnswered ? reply.reason : 'Claude did not answer'}.` } : x))
+/** The prompt for a new test of the change: Claude reads the diff itself, writes the objective and runs it. */
+function newTestPrompt(files: readonly string[], url?: string): string {
+  const rel = files.map(f => (f.startsWith(`${projectDir}/`) ? f.slice(projectDir.length + 1) : f))
+  const start = url ? ` --url ${url}` : ''
+  const hint = url ? '' : ' kane-cli needs a start page: pass --url with this app\'s URL unless `kane-cli config show` has a default_url.'
+  return `Test my last change with kane-cli: read \`git diff -- ${rel.join(' ')}\`, write one test objective (what a user does and what must be true at the end), then run kane-cli run "<objective>"${start} --agent --headless.${hint} Then report the result.`
 }
 
 function autoInstruction(files: readonly string[], saved: readonly string[], url?: string): string {
@@ -1005,25 +1004,22 @@ async function act($: EngineInterface, a: string) {
   else if (k === 'uc-close') {
     const a = await read($, assuranceAtom)
     const u = a.state === 'ready' ? a.useCases.find(x => x.id === arg) : undefined
-    if (u) void $.prompt.submit({ text: gapsPrompt(u) }).catch(() => undefined)
+    if (u) await fill($, gapsPrompt(u))
   } else if (k === 'run') await update($, viewAtom, v => ({ ...v, open: arg, tab: 'runs' as const }))
   else if (k === 'back') await update($, viewAtom, v => ({ ...v, open: '' }))
   else if (k === 'offer') await openOffer($)
-  else if (k === 'offer-draft') await draftObjective($)
-  else if (k === 'offer-run') {
+  else if (k === 'offer-new') {
     const o = await read($, offerAtom)
-    if (!o?.objective) return
+    if (!o) return
     await update($, viewAtom, v => ({ ...v, open: '' }))
     await update($, offerAtom, () => null)
-    const url = o.url ? ` --url ${o.url}` : ''
-    const hint = o.url ? '' : ' kane-cli needs a start page: pass --url with this app\'s URL unless `kane-cli config show` has a default_url.'
-    void $.prompt.submit({ text: `Test my last change with kane-cli: kane-cli run "${o.objective.replace(/"/g, "'")}"${url} --agent --headless.${hint} Then report the result.` }).catch(() => undefined)
+    await fill($, newTestPrompt(o.files, o.url))
   } else if (k === 'saved') {
     const o = await read($, offerAtom)
     await update($, viewAtom, v => ({ ...v, open: '' }))
     await update($, offerAtom, () => null)
     const url = o?.url ? ` --url ${o.url}` : ''
-    void $.prompt.submit({ text: `Test my last change with the saved kane-cli test: kane-cli testmd run .testmuai/tests/${arg}${url} --agent --headless. Then report the result.` }).catch(() => undefined)
+    await fill($, `Test my last change with the saved kane-cli test: kane-cli testmd run .testmuai/tests/${arg}${url} --agent --headless. Then report the result.`)
   } else if (k === 'offer-skip') {
     await update($, offerAtom, () => null)
     await update($, changeAtom, c => (c ? { ...c, shown: false } : c))
@@ -1033,9 +1029,7 @@ async function act($: EngineInterface, a: string) {
     await update($, viewAtom, v => ({ ...v, tab: 'runs' as const, open: arg, uc: '' }))
     await openPane($)
   } else if (k === 'setup') {
-    void $.prompt.submit({
-      text: 'Set up kane-cli assurance for this project: ask me for the requirement (a PRD file, a Jira, Confluence or Linear link, or a web page), ingest it with kane-cli, extract the use cases and design tests (use --mode agent), then show me the coverage with kane-cli cover gaps.',
-    }).catch(() => undefined)
+    await fill($, 'Set up kane-cli assurance for this project: ask me for the requirement (a PRD file, a Jira, Confluence or Linear link, or a web page), ingest it with kane-cli, extract the use cases and design tests (use --mode agent), then show me the coverage with kane-cli cover gaps.')
   }
 }
 
@@ -1067,7 +1061,8 @@ async function chatCardAt($: EngineInterface, e: { requestId: string; surface: R
   const clickable = e.surface !== 'terminal' || e.viewport?.isFullscreen === true
   if (e.surface === 'terminal' && (r.status === 'running' || r.status === 'pending')) spinSites.add(e.requestId)
   else spinSites.delete(e.requestId)
-  return chatCard($.ui.resolve(e as never), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable)
+  const viewer = r.evidence ? (await read($, viewerAtom))[r.evidence] : undefined
+  return chatCard($.ui.resolve(e as never), e.surface, press, r, await $.clock.now(), e.viewport?.columns ?? 90, clickable, viewer)
 }
 
 // ── the mod ──────────────────────────────────────────────────────────────
@@ -1217,7 +1212,7 @@ export const register: Register = (on, options) => {
     else if (v.tab === 'history') body = historyView(ui, await read($, historyAtom), now, width)
     else if (v.open === 'offer') body = offerView(ui, press, await read($, offerAtom), await read($, changeAtom), now, width)
     else if (opened?.kind === 'testrun' && opened.members) body = suiteView(ui, press, opened, now, width, true)
-    else if (opened) body = runDetail(ui, press, opened, now, width)
+    else if (opened) body = runDetail(ui, press, opened, now, width, opened.evidence ? (await read($, viewerAtom))[opened.evidence] : undefined)
     else body = runsView(ui, press, runs, now, width, await read($, lastAtom))
     return (
       <ui.Box flexDirection="column">

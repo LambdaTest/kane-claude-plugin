@@ -21,7 +21,6 @@ import {
   onGrid,
   labelFromCommand,
   newRun,
-  objectiveFrom,
   parseCoverGaps,
   rowText,
   rowWidth,
@@ -486,12 +485,6 @@ describe('labels, edits and drafts', () => {
     // A better match still outranks a failure.
     const better = [...saved, { name: 'validate_postcode_test.md', text: 'checkout validate' }]
     expect(savedTestsFor(changed, better, last)[0]).toBe('validate_postcode_test.md')
-  })
-
-  test('the drafted objective is the reply, without labels or quotes', () => {
-    expect(objectiveFrom('Objective: "Type a postcode with a space and check the order is placed."')).toBe('Type a postcode with a space and check the order is placed.')
-    // Real reply: the fork added a remark about the conversation after the objective.
-    expect(objectiveFrom('Type "Foo ?" into the search box\nand submit it.\n\nNothing to do here: I did not start that agent.')).toBe('Type "Foo ?" into the search box and submit it.')
   })
 })
 

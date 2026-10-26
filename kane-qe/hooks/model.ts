@@ -749,27 +749,3 @@ export function startUrl(saved: readonly { text: string }[]): string | undefined
   return [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
 }
 
-/** What Claude is asked when the offer card opens. */
-export function draftPrompt(files: readonly string[], diff: string): string {
-  return [
-    'Draft one browser test objective for the change below, for kane-cli (KaneAI) to run.',
-    'One or two plain sentences: what a user does, and what must be true at the end. No preamble, no quotes, no code.',
-    '',
-    `Changed files: ${files.join(', ')}`,
-    diff ? `\nDiff:\n${diff}` : '',
-  ].join('\n')
-}
-
-/** The reply's objective: its first non-empty lines, without quotes or a leading label. */
-export function objectiveFrom(reply: string): string {
-  // The first paragraph: a fork can add a remark about the conversation after it.
-  return (reply.trim().split(/\n\s*\n/)[0] ?? '')
-    .split('\n')
-    .map(l => l.trim())
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(' ')
-    .replace(/^(objective|test objective)\s*:\s*/i, '')
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .trim()
-}

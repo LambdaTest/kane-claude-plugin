@@ -79,7 +79,7 @@ export type AfterChange = 'offer' | 'auto' | 'off'
 export type Change = { files: string[]; firstAt: number; lastAt: number; shown: boolean; heldAt?: number }
 
 /** `url`: the app's start page, as the project's saved tests name it. */
-export type Offer = { files: string[]; objective?: string; drafting: boolean; note?: string; saved: string[]; url?: string; last?: Record<string, HistoryEntry> }
+export type Offer = { files: string[]; saved: string[]; url?: string; last?: Record<string, HistoryEntry> }
 
 export type View = {
   tab: 'runs' | 'assure' | 'history'
@@ -105,6 +105,8 @@ declare module 'claude-code' {
       mode: '' | AfterChange
       last: HistoryEntry | null
       history: HistoryEntry[]
+      /** Evidence viewer links this session, by pack. */
+      viewers: Record<string, string>
     }
   }
 }

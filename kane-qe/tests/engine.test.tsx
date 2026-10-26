@@ -24,7 +24,7 @@ const PANE = {
   props: { title: 'Kane', isFocused: false, bodyColumns: 56, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; reads: string[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; forkText?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
+type World = { files: Record<string, string>; alive: Set<number>; prompts: string[]; ran: string[][]; reads: string[]; rows: { component: string; isExpanded?: boolean }[]; viewer?: string; cover?: string; ignored: Set<string>; bashResult?: unknown; store?: Record<string, unknown>; ps?: Record<number, string> }
 
 /** The engine beneath the plugin: a fake disk, processes, and the calls the mod makes. */
 function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<typeof mock.clock> } {
@@ -36,11 +36,17 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('ui.blit', () => ({ value: {} }) as never)
-  on('prompt.submit', ($, e) => {
+  // The mod fills the prompt box; it never submits a prompt itself.
+  on('prompt.fill', ($, e) => {
     state.prompts.push(String((e as { text?: unknown }).text))
-    return { text: String((e as { text?: unknown }).text) } as never
+    return { isFilled: true } as never
   })
-  on('model.fork', () => ({ value: state.forkText ? { isAnswered: true, text: state.forkText } : { isAnswered: false, reason: 'nothing-to-fork' } }) as never)
+  on('prompt.submit', () => {
+    throw new Error('the mod must not submit prompts')
+  })
+  on('model.fork', () => {
+    throw new Error('the mod must not call the model itself')
+  })
   on('fs.exists', ($, e) => ({ value: e.path in state.files || Object.keys(state.files).some(f => f.startsWith(`${e.path}/`)) }) as never)
   on('fs.list', ($, e) => {
     const dir = `${e.path.replace(/\/$/, '')}/`
@@ -55,11 +61,9 @@ function world(on: On, w: Partial<World> = {}): World & { clock: ReturnType<type
   on('process.run', ($, e) => {
     const argv = e.argv
     state.ran.push([...argv])
-    if (argv[0] === 'open') return OK('') as never
     if (argv[0] === 'ps') return (state.ps?.[Number(argv[4])] ? OK(`${state.ps[Number(argv[4])]}\n`) : OK('', 1)) as never
     if (argv[0] === 'kill') return OK('', state.alive.has(Number(argv[2])) ? 0 : 1) as never
     if (argv[0] === 'git' && argv[1] === 'check-ignore') return OK('', state.ignored.has(String(argv[3])) ? 0 : 1) as never
-    if (argv[0] === 'git' && argv[1] === 'diff') return OK('+ postcode.trim()') as never
     if (argv.includes('cover')) return (state.cover ? OK(state.cover) : OK('error: no context store here', 1)) as never
     return OK('', 1) as never
   })
@@ -405,8 +409,8 @@ describe('after Claude changes code', () => {
     await $.tool.call({ tool: 'Write', file_path: path, content: 'x' } as never)
   }
 
-  test('offer: a turn ending with an edit raises the warning; the card drafts an objective and hands it to Claude; a later run clears it', async ($, on) => {
-    const w = world(on, { forkText: 'Objective: Type a postcode with a space and check the order is placed.' })
+  test('offer: a turn ending with an edit raises the warning; a new test fills the prompt for Claude to write and run; a later run clears it', async ($, on) => {
+    const w = world(on)
     w.files[`${PROJECT}/.testmuai/tests/checkout_guest_test.md`] = 'Open https://shop.test/ and fill the shipping address as a guest'
     await $.session.start({ cwd: PROJECT, surface: 'terminal', isInteractive: true } as never)
     await edit($, `${PROJECT}/src/checkout/AddressForm.tsx`)
@@ -422,12 +426,12 @@ describe('after Claude changes code', () => {
     // A saved test covers it: offered first, no draft until asked.
     expect(await pane.find({ type: 'Text', text: /^checkout_guest$/ })).toBeDefined()
     expect(await pane.find({ key: 'saved-run-checkout_guest_test.md' })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /Suggested objective/ })).toBeUndefined()
-    await pane.press({ key: 'offer-draft' })
+    await pane.press({ key: 'offer-new' })
     await w.clock.settle()
-    expect(await pane.find({ type: 'Text', text: /Type a postcode with a space/ })).toBeDefined()
-    await pane.press({ key: 'offer-run' })
-    expect(w.prompts.at(-1)).toContain('kane-cli run "Type a postcode with a space and check the order is placed." --url https://shop.test/ --agent --headless')
+    // The prompt waits in the box for the person: Claude reads the diff itself, so the mod runs no git diff.
+    expect(w.prompts.at(-1)).toContain('read `git diff -- src/checkout/AddressForm.tsx`')
+    expect(w.prompts.at(-1)).toContain('kane-cli run "<objective>" --url https://shop.test/ --agent --headless')
+    expect(w.ran.some(a => a[0] === 'git' && a[1] === 'diff')).toBe(false)
 
     // Claude runs it; the run ends: the warning is gone.
     await w.clock.advance(5000)
@@ -685,13 +689,18 @@ describe('the card in the chat', () => {
     await card.press({ key: 'card-evidence' })
     await w.clock.settle()
     expect(w.ran.some(a => a.join(' ') === `kane-cli evidence serve ${dir}/evidence/8f0e.evidence`)).toBe(true)
-    expect(w.ran.some(a => a[0] === 'open' && a[1] === 'https://viewer.example/?pack=p')).toBe(true)
+    // The viewer's link is drawn for the person to click: the mod opens no browser itself.
+    expect(w.ran.some(a => a[0] === 'open' || a[0] === 'xdg-open')).toBe(false)
     expect(w.prompts).toEqual([])
-    // A second press reuses the viewer that is already serving.
-    await card.press({ key: 'card-evidence' })
-    await w.clock.settle()
+    expect(await card.find({ key: 'card-evidence' })).toBeUndefined()
+    const link = await card.find({ type: 'Link' })
+    expect(link?.props.href).toBe('https://viewer.example/?pack=p')
+    // The run's pane shows the same link, and the viewer is not started twice.
+    await card.press({ key: 'card-steps' })
+    const detail = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
+    expect((await detail.find({ type: 'Link' }))?.props.href).toBe('https://viewer.example/?pack=p')
+    await detail.unmount()
     expect(w.ran.filter(a => a.includes('serve')).length).toBe(1)
-    expect(w.ran.filter(a => a[0] === 'open').length).toBe(2)
     await card.press({ key: 'card-steps' })
     const pane = await $.ui.mount({ ...PANE, surface: 'terminal' } as never)
     expect(await pane.find({ type: 'Text', text: /^where$/ })).toBeDefined()
@@ -745,7 +754,7 @@ describe('the card in the chat', () => {
     const card = await $.ui.mount({ ...row('ToolUse', 'toolu_1', CMD, FULL), surface: 'terminal' } as never)
     await card.press({ key: 'card-evidence' })
     await w.clock.settle()
-    expect(w.ran.some(a => a[0] === 'open')).toBe(false)
+    expect(w.ran.some(a => a[0] === 'open' || a[0] === 'xdg-open')).toBe(false)
     expect(w.prompts[0]).toContain(`${dir}/evidence/8f0e.evidence`)
     await card.unmount()
   })
