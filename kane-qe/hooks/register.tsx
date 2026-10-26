@@ -645,17 +645,17 @@ function applyLines(runs: Run[], w: Watch, lines: readonly string[], now: number
   const id = w.parent ?? w.id
   let i = runs.findIndex(r => r.id === id)
   if (i === -1) return { runs, ended }
-  let next = [...runs]
+  let updated = [...runs]
   for (const l of lines) {
     const a = adapt(l, now)
     if (a.bad) {
-      const at = next.findIndex(r => r.id === id)
-      if (at >= 0 && !w.member) next[at] = { ...next[at]!, skipped: (next[at]!.skipped ?? 0) + 1 }
+      const at = updated.findIndex(r => r.id === id)
+      if (at >= 0 && !w.member) updated[at] = { ...updated[at]!, skipped: (updated[at]!.skipped ?? 0) + 1 }
     }
     for (const ev of a.events) {
-      const before = next[i]!
+      const before = updated[i]!
       const after = w.member ? foldMember(before, w.member, ev) : fold(before, ev)
-      next[i] = after
+      updated[i] = after
       if (!w.member && ev.k === 'memberStart' && ev.logPath && !watches.has(ev.logPath)) {
         watches.set(ev.logPath, { id: ev.logPath, path: ev.logPath, bytes: 0, rest: '', done: false, member: ev.path, parent: id })
       }
@@ -671,8 +671,8 @@ function applyLines(runs: Run[], w: Watch, lines: readonly string[], now: number
       }
     }
   }
-  i = next.findIndex(r => r.id === id)
-  return { runs: next, ended }
+  i = updated.findIndex(r => r.id === id)
+  return { runs: updated, ended }
 }
 
 function terminal(run: Run, ev: Ev): boolean {
@@ -690,13 +690,13 @@ async function poll($: EngineInterface) {
     let changed = false
     const ended: Run[] = []
     const listing = await $.fs.list(activeDir).catch(() => [])
-    const present = new Set(listing.map(e => e.name))
-    for (const e of listing) {
-      if (!e.name.endsWith('.json') || seenPointers.has(e.name)) continue
-      seenPointers.add(e.name)
-      const p = parsePointer((await $.fs.read(`${activeDir}/${e.name}`).catch(() => '')) ?? '', now)
+    const present = new Set(listing.map(entry => entry.name))
+    for (const entry of listing) {
+      if (!entry.name.endsWith('.json') || seenPointers.has(entry.name)) continue
+      seenPointers.add(entry.name)
+      const p = parsePointer((await $.fs.read(`${activeDir}/${entry.name}`).catch(() => '')) ?? '', now)
       if (!p || !inside(p.cwd, projectDir) || !(await alive($, p.pid))) continue
-      runs = startWatch(runs, p, e.name, await processLabel($, p.pid))
+      runs = startWatch(runs, p, entry.name, await processLabel($, p.pid))
       changed = true
     }
     // Members first, so a suite's end reads its members' last lines; a member a suite names now is read now too.
@@ -871,9 +871,9 @@ async function recent($: EngineInterface): Promise<Record<string, HistoryEntry[]
 /** Reads Claude Code's theme, and redraws when it moved between light and dark. */
 async function readTheme($: EngineInterface) {
   const row = (await $.config.list()).find(r => r.key === 'theme')
-  const next = usePalette(row?.value)
-  if (next === palette) return
-  palette = next
+  const theme = usePalette(row?.value)
+  if (theme === palette) return
+  palette = theme
   await update($, tickAtom, n => n + 1)
 }
 
@@ -909,8 +909,8 @@ async function savedTests($: EngineInterface): Promise<{ name: string; text: str
   const dir = `${projectDir}/.testmuai/tests`
   const list = await $.fs.list(dir).catch(() => [])
   const out: { name: string; text: string }[] = []
-  for (const e of list.filter(x => x.name.endsWith('_test.md')).slice(0, 40)) {
-    out.push({ name: e.name, text: (await $.fs.read(`${dir}/${e.name}`).catch(() => '')) ?? '' })
+  for (const test of list.filter(x => x.name.endsWith('_test.md')).slice(0, 40)) {
+    out.push({ name: test.name, text: (await $.fs.read(`${dir}/${test.name}`).catch(() => '')) ?? '' })
   }
   return out
 }
@@ -1089,24 +1089,24 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('command.run', { command: 'kane' }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
+  on('command.run', { command: 'kane' }, async ($kane, cmd) => {
+    const arg = cmd.args.trim().toLowerCase()
     if (arg === '' || arg === 'runs') {
-      await act($, 'tab:runs')
+      await act($kane, 'tab:runs')
       return { text: 'Kane pane opened. It follows every kane-cli run in this folder by itself.' }
     }
     if (arg === 'assurance' || arg === 'assure') {
-      await refreshAssurance($)
-      await act($, 'tab:assure')
+      await refreshAssurance($kane)
+      await act($kane, 'tab:assure')
       return { text: 'Kane: assurance for this project.' }
     }
     if (arg === 'history') {
-      await act($, 'tab:history')
+      await act($kane, 'tab:history')
       return { text: 'Kane: finished runs in this project.' }
     }
     if (arg === 'auto' || arg === 'ask' || arg === 'off') {
       const mode: AfterChange = arg === 'ask' ? 'offer' : arg
-      await update($, modeAtom, () => mode)
+      await update($kane, modeAtom, () => mode)
       return { text: `Kane: after Claude changes code, ${mode === 'auto' ? 'Claude tests it before it finishes' : mode === 'offer' ? 'the band offers to test it' : 'nothing happens'} (this session).` }
     }
     return { text: 'Kane: /kane opens the pane · /kane assurance · /kane history · /kane auto | ask | off sets what happens after Claude changes code.' }
